@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debarras-frontend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debarras-frontend
+  template:
+    metadata:
+      labels:
+        app: debarras-frontend
+    spec:
+      containers:
+        - name: debarras-frontend
+          image: jeanmichelbb/debarras-fe:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: debarras-frontend
+  namespace: default
+spec:
+  selector:
+    app: debarras-frontend
+  ports:
+    - port: 80
+      targetPort: 80

@@ -1,0 +1,221 @@
+import { useEffect, useState } from 'react'
+import { api } from './api.js'
+import { commitSwipe, removeSwipe } from './actions.js'
+import { Poster, Sheet, Spinner } from './ui.jsx'
+import { useApp } from './ctx.jsx'
+
+const PROVIDER_GROUPS = [
+  ['flatrate', 'd_stream'],
+  ['free', 'd_free'],
+  ['ads', 'd_ads'],
+  ['rent', 'd_rent'],
+  ['buy', 'd_buy'],
+]
+const REVIEW_PREVIEW = 280
+
+function Providers({ providers, region }) {
+  const { t } = useApp()
+  const groups = providers ? PROVIDER_GROUPS.filter(([k]) => providers[k]?.length) : []
+  return (
+    <section className="block">
+      <h3>{t('d_where', { region })}</h3>
+      {groups.length === 0 ? (
+        <p className="muted">{t('d_no_providers', { region })}</p>
+      ) : (
+        groups.map(([kind, label]) => (
+          <div key={kind} className="providers">
+            <span className="providers__label">{t(label)}</span>
+            <ul>
+              {providers[kind].map((p) => (
+                <li key={p.name} title={p.name}>
+                  {p.logo ? <img src={p.logo} alt={p.name} loading="lazy" /> : p.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
+      <p className="muted small">{t('d_providers_credit')}</p>
+    </section>
+  )
+}
+
+function Facts({ facts }) {
+  const { t } = useApp()
+  return (
+    <section className="block">
+      <h3>{t('d_facts')}</h3>
+      {facts === undefined && <Spinner label={t('loading')} />}
+      {facts === null && <p className="muted">{t('d_facts_none')}</p>}
+      {facts &&
+        facts.sections.map((s) => (
+          <div key={s.heading} className="fact">
+            <h4>{s.heading}</h4>
+            <p>{s.text}</p>
+          </div>
+        ))}
+      {facts && (
+        <p className="muted small">
+          <a href={facts.url} target="_blank" rel="noreferrer">{t('d_facts_source')}</a>
+          {facts.fallback_language ? ` ${t('d_facts_fallback')}` : ''}
+        </p>
+      )}
+    </section>
+  )
+}
+
+function Review({ r }) {
+  const { t } = useApp()
+  const [open, setOpen] = useState(false)
+  const long = r.content.length > REVIEW_PREVIEW
+  return (
+    <blockquote className="review">
+      <p>{open || !long ? r.content : `${r.content.slice(0, REVIEW_PREVIEW).trimEnd()}…`}</p>
+      <footer>
+        {r.author}
+        {r.rating ? `, ${r.rating}/10` : ''}
+        {long && (
+          <button type="button" className="linkbtn" onClick={() => setOpen(!open)}>{open ? t('d_less') : t('d_more')}</button>
+        )}
+      </footer>
+    </blockquote>
+  )
+}
+
+export default function DetailSheet({ item, status, onClose }) {
+  const { t, notify, errorText } = useApp()
+  const [d, setD] = useState(null)
+  const [facts, setFacts] = useState(undefined)
+  const [failed, setFailed] = useState(false)
+  const [trailer, setTrailer] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    setD(null)
+    setFacts(undefined)
+    setFailed(false)
+    api.details(item.media_type, item.tmdb_id)
+      .then((r) => live && setD(r))
+      .catch(() => live && setFailed(true))
+    api.facts(item.media_type, item.tmdb_id)
+      .then((r) => live && setFacts(r.facts))
+      .catch(() => live && setFacts(null))
+    return () => {
+      live = false
+    }
+  }, [item.media_type, item.tmdb_id])
+
+  const act = async (next) => {
+    setBusy(true)
+    try {
+      await commitSwipe(next, item, 'sheet')
+      onClose()
+    } catch (e) {
+      notify(errorText(e, 'save_failed'), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await removeSwipe(item)
+      onClose()
+    } catch (e) {
+      notify(errorText(e, 'save_failed'), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runtime = d?.runtime ? t('d_runtime', { n: d.runtime }) : null
+  const seasons = d?.number_of_seasons ? (d.number_of_seasons === 1 ? t('d_season') : t('d_seasons', { n: d.number_of_seasons })) : null
+  const director = d?.crew?.filter((c) => c.job === 'Director').map((c) => c.name)
+  const creator = d?.crew?.filter((c) => c.job === 'Creator').map((c) => c.name)
+  const trailerKey = d?.videos?.[0]?.key
+
+  return (
+    <Sheet onClose={onClose} title={item.title} wide>
+      <header className="detail__head">
+        <div className="detail__poster"><Poster src={item.poster} title={item.title} eager /></div>
+        <div>
+          <h2 className="detail__title">{item.title}</h2>
+          <p className="detail__facts">
+            {(d?.year || item.year) && <span>{d?.year || item.year}</span>}
+            <span>{item.media_type === 'tv' ? t('type_tv') : t('type_movie')}</span>
+            {runtime && <span>{runtime}</span>}
+            {seasons && <span>{seasons}</span>}
+            {d?.vote_average ? <span>{d.vote_average.toFixed(1)} / 10</span> : null}
+          </p>
+          {d?.genres?.length > 0 && <p className="muted">{d.genres.map((g) => g.name).join(', ')}</p>}
+          {director?.length > 0 && <p className="muted">{t('d_director')} {director.join(', ')}</p>}
+          {creator?.length > 0 && <p className="muted">{t('d_creator')} {creator.join(', ')}</p>}
+        </div>
+      </header>
+
+      <div className="detail__actions">
+        {['not_now', 'want', 'watched'].map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`stampbtn stampbtn--${s} ${status === s ? 'is-current' : ''}`}
+            aria-pressed={status === s}
+            disabled={busy}
+            onClick={() => act(s)}
+          >
+            {t(`st_${s}`)}
+          </button>
+        ))}
+      </div>
+      {status && (
+        <button type="button" className="linkbtn" disabled={busy} onClick={remove}>{t('d_remove')}</button>
+      )}
+
+      {failed && <p className="notice notice--error">{t('d_load_failed')}</p>}
+      {!d && !failed && <Spinner label={t('loading')} />}
+
+      {d && (
+        <>
+          {d.tagline && <p className="detail__tagline">{d.tagline}</p>}
+          {d.overview && <p className="detail__overview">{d.overview}</p>}
+
+          {trailerKey && (
+            <section className="block">
+              {trailer ? (
+                <div className="trailer">
+                  <iframe
+                    src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&rel=0`}
+                    title={d.videos[0].name || t('d_trailer')}
+                    allow="autoplay; encrypted-media; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              ) : (
+                <button type="button" className="btn btn--ghost" onClick={() => setTrailer(true)}>{t('d_trailer')}</button>
+              )}
+            </section>
+          )}
+
+          <Providers providers={d.providers} region={d.region} />
+
+          {d.cast?.length > 0 && (
+            <section className="block">
+              <h3>{t('d_cast')}</h3>
+              <p>{d.cast.slice(0, 10).map((c) => c.name).join(', ')}</p>
+            </section>
+          )}
+
+          <Facts facts={facts} />
+
+          {d.reviews?.length > 0 && (
+            <section className="block">
+              <h3>{t('d_reviews')}</h3>
+              {d.reviews.slice(0, 3).map((r, i) => <Review key={i} r={r} />)}
+            </section>
+          )}
+        </>
+      )}
+    </Sheet>
+  )
+}

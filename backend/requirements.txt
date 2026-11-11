@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+pymysql==1.1.1
+python-dotenv==1.0.1
+cryptography>=44
+httpx==0.27.2
+python-multipart==0.0.12
+PyJWT==2.9.0
+webauthn==2.5.1
+prometheus-fastapi-instrumentator
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-sqlalchemy
+pytest

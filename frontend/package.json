@@ -1,0 +1,24 @@
+{
+  "name": "debarras",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test src/"
+  },
+  "dependencies": {
+    "@fontsource-variable/instrument-sans": "^5.2.0",
+    "@fontsource/big-shoulders-display": "^5.2.0",
+    "@simplewebauthn/browser": "^13.1.0",
+    "framer-motion": "^11.18.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
+  }
+}

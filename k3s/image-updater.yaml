@@ -1,0 +1,30 @@
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: debarras
+  namespace: argocd
+spec:
+  applicationRefs:
+    - namePattern: debarras
+      images:
+        - alias: frontend
+          imageName: jeanmichelbb/debarras-fe
+          commonUpdateSettings:
+            updateStrategy: alphabetical
+            allowTags: "regexp:^[0-9]{10}-[0-9a-f]{40}$"
+          manifestTargets:
+            kustomize:
+              name: jeanmichelbb/debarras-fe
+        - alias: backend
+          imageName: jeanmichelbb/debarras-be
+          commonUpdateSettings:
+            updateStrategy: alphabetical
+            allowTags: "regexp:^[0-9]{10}-[0-9a-f]{40}$"
+          manifestTargets:
+            kustomize:
+              name: jeanmichelbb/debarras-be
+      writeBackConfig:
+        method: "git:secret:argocd/git-creds-github"
+        gitConfig:
+          branch: main
+          writeBackTarget: "kustomization:."

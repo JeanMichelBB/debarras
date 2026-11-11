@@ -1,0 +1,12 @@
+{
+  "name": "Débarras",
+  "short_name": "Débarras",
+  "description": "Clear out your movie and TV backlog by swiping.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#131C29",
+  "theme_color": "#131C29",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

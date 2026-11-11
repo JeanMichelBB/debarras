@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debarras-backend
+  namespace: default
+  annotations:
+    secrets.doppler.com/reload: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debarras-backend
+  template:
+    metadata:
+      labels:
+        app: debarras-backend
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox
+          command: ['sh', '-c', 'until nc -z mysql 3306; do echo "Waiting for MySQL..."; sleep 3; done']
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+      containers:
+        - name: debarras-backend
+          image: jeanmichelbb/debarras-be:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8002
+          envFrom:
+            - secretRef:
+                name: debarras-backend-secret
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: debarras-backend
+  namespace: default
+spec:
+  selector:
+    app: debarras-backend
+  ports:
+    - port: 8002
+      targetPort: 8002
