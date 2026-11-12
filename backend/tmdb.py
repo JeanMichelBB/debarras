@@ -17,6 +17,7 @@ from datetime import timedelta
 
 import httpx
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import config
@@ -339,13 +340,20 @@ def _read_cached(media_type: str, tmdb_id: int, lang: str):
 
 
 def _write_cached(media_type: str, tmdb_id: int, lang: str, data: dict) -> None:
+    """Upsert. Two requests for the same title can finish together (details and facts both ask),
+    so a lost insert race is handled by updating the row the other one just wrote."""
     with SessionLocal() as s:
-        row = s.get(TitleCache, (media_type, tmdb_id, lang))
-        if row:
-            row.data, row.refreshed_at = data, utcnow()
-        else:
-            s.add(TitleCache(media_type=media_type, tmdb_id=tmdb_id, lang=lang, data=data, refreshed_at=utcnow()))
-        s.commit()
+        for _ in range(2):
+            row = s.get(TitleCache, (media_type, tmdb_id, lang))
+            if row:
+                row.data, row.refreshed_at = data, utcnow()
+            else:
+                s.add(TitleCache(media_type=media_type, tmdb_id=tmdb_id, lang=lang, data=data, refreshed_at=utcnow()))
+            try:
+                s.commit()
+                return
+            except IntegrityError:
+                s.rollback()
 
 
 async def get_details(db: Session, media_type: str, tmdb_id: int, lang: str = "en", hi: bool = False) -> dict:

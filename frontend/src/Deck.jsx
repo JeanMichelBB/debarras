@@ -48,10 +48,13 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
     busy.current = true
     setIntent(status)
     const to = FLY[status]
-    await Promise.all([
+    // Never wait on the animation alone: if the browser interrupts it (touch cancel, the drag's own
+    // snap-back taking over x), its promise may never settle and the card would stay locked.
+    const flight = Promise.all([
       animate(x, to.x, { duration: 0.24, ease: 'easeIn' }),
       animate(y, to.y, { duration: 0.24, ease: 'easeIn' }),
-    ])
+    ]).catch(() => {})
+    await Promise.race([flight, new Promise((r) => setTimeout(r, 500))])
     onDecide(status, top)
     setTimeout(() => (busy.current = false), 600) // safety net if the card did not change
   }

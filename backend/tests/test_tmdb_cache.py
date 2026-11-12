@@ -87,3 +87,13 @@ def test_recommendations_come_with_the_details_not_a_separate_call(client, user,
     ids = [c["tmdb_id"] for c in queue(client, user)["cards"]]
     assert 8 in ids  # the recommended title still shows up
     assert not [p for p, _ in fake_tmdb.calls if p.endswith("/recommendations")]
+
+
+def test_writing_the_same_title_twice_does_not_fail():
+    from database.connection import SessionLocal
+    from database.models import TitleCache
+
+    tmdb._write_cached("movie", 5, "en", {"v": tmdb.SLIM_VERSION, "n": 1})
+    tmdb._write_cached("movie", 5, "en", {"v": tmdb.SLIM_VERSION, "n": 2})  # the second one updates
+    with SessionLocal() as s:
+        assert s.get(TitleCache, ("movie", 5, "en")).data["n"] == 2
