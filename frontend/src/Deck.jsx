@@ -25,6 +25,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
   const y = useMotionValue(0)
   const rotate = useTransform(x, [-260, 0, 260], [-9, 0, 9])
   const [intent, setIntent] = useState(null)
+  const [flying, setFlying] = useState(false) // the top card is leaving: it must not accept a new touch
   const busy = useRef(false)
   const moved = useRef(false) // true once a press turned into a drag, so its release is not a tap
   const top = cards[0]
@@ -35,6 +36,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
     x.set(0)
     y.set(0)
     setIntent(null)
+    setFlying(false)
     busy.current = false
   }, [topKey, x, y])
 
@@ -46,6 +48,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
   const fly = async (status) => {
     if (busy.current || !top) return
     busy.current = true
+    setFlying(true)
     setIntent(status)
     const to = FLY[status]
     // Never wait on the animation alone: if the browser interrupts it (touch cancel, the drag's own
@@ -56,7 +59,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
     ]).catch(() => {})
     await Promise.race([flight, new Promise((r) => setTimeout(r, 500))])
     onDecide(status, top)
-    setTimeout(() => (busy.current = false), 600) // safety net if the card did not change
+    setTimeout(() => { busy.current = false; setFlying(false) }, 600) // safety net if the card did not change
   }
 
   useImperativeHandle(ref, () => ({
@@ -94,7 +97,9 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
         >
         <motion.div
           className="card card--top"
-          style={{ x, y, rotate }}
+          // A quick flick can start on the card that is still flying off. When that card unmounts mid-drag,
+          // framer keeps its global drag lock and no card can be dragged again until a reload.
+          style={{ x, y, rotate, pointerEvents: flying ? 'none' : undefined }}
           drag
           dragMomentum={false}
           dragElastic={0.9}
