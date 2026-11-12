@@ -4,6 +4,15 @@ import { decide, withMomentum, FLY, PREVIEW, THRESHOLD } from './swipeLogic.js'
 import { Poster, Stamp } from './ui.jsx'
 import { useApp } from './ctx.jsx'
 
+const BEHIND = 9 // cards visible under the top one (10 in the pile)
+// Hand-dropped pile. Tilt and sideways nudge belong to the title (hashed from its id), not to its
+// position, so a card keeps its own angle while it moves up the pile. Only the depth offset changes.
+function look(card) {
+  let h = Number(card.tmdb_id) * 2654435761 + (card.media_type === 'tv' ? 40503 : 0)
+  const next = () => ((h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0) % 1000) / 1000
+  next()
+  return { tilt: (next() * 2 - 1) * 5, dx: (next() * 2 - 1) * 9 }
+}
 const SPRING = { type: 'spring', stiffness: 520, damping: 34 }
 
 /**
@@ -17,6 +26,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
   const rotate = useTransform(x, [-260, 0, 260], [-9, 0, 9])
   const [intent, setIntent] = useState(null)
   const busy = useRef(false)
+  const moved = useRef(false) // true once a press turned into a drag, so its release is not a tap
   const top = cards[0]
   const topKey = top ? `${top.media_type}:${top.tmdb_id}` : ''
 
@@ -50,14 +60,23 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
     trigger: (status) => (status === 'details' ? top && onDetails(top) : fly(status)),
   }))
 
-  const behind = cards.slice(1, 3)
+  const behind = cards.slice(1, 1 + BEHIND)
 
   return (
     <div className="deck">
       {behind
         .map((c, i) => (
-          <div key={`${c.media_type}:${c.tmdb_id}`} className={`card card--behind card--behind-${i + 1}`} aria-hidden="true">
-            <Poster src={c.poster} title={c.title} eager />
+          <div
+            key={`${c.media_type}:${c.tmdb_id}`}
+            className="card card--behind"
+            style={{
+              transform: `translate(${look(c).dx}px, ${(i + 1) * 3 + 4}px) rotate(${look(c).tilt}deg)`,
+              filter: `brightness(${Math.max(0.3, 0.78 - i * 0.06)})`,
+              zIndex: BEHIND - i,
+            }}
+            aria-hidden="true"
+          >
+            <Poster src={c.poster} title={c.title} eager={i < 3} />
           </div>
         ))
         .reverse()}
@@ -65,6 +84,12 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
       {top && (
         <motion.div
           key={topKey}
+          className="card-pose"
+          initial={{ rotate: look(top).tilt, x: look(top).dx, y: 7 }}
+          animate={{ rotate: 0, x: 0, y: 0 }}
+          transition={{ type: 'spring', stiffness: 380, damping: 26 }}
+        >
+        <motion.div
           className="card card--top"
           style={{ x, y, rotate }}
           drag
@@ -72,6 +97,8 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
           dragElastic={0.9}
           dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
           whileTap={{ cursor: 'grabbing' }}
+          onTapStart={() => (moved.current = false)}
+          onDragStart={() => (moved.current = true)}
           onDrag={(_, info) => {
             const d = decide(info.offset, PREVIEW)
             setIntent(d && d !== 'details' ? d : null)
@@ -89,7 +116,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
               fly(d)
             }
           }}
-          onTap={() => onDetails(top)}
+          onTap={() => !moved.current && !busy.current && onDetails(top)}
         >
           <Poster src={top.poster} title={top.title} eager />
           <div className="card__shade" />
@@ -103,6 +130,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
             {top.reason && <p className="card__reason">{top.reason}</p>}
           </div>
           {intent && <Stamp status={intent} className={`card__stamp card__stamp--${intent}`} />}
+        </motion.div>
         </motion.div>
       )}
     </div>

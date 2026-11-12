@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from './api.js'
 import { commitSwipe, removeSwipe, sameTitle, EVT_SWIPE, EVT_UNDO } from './actions.js'
 import { decisionForKey, filterParams, countActiveFilters } from './swipeLogic.js'
 import { loadFilters, saveFilters } from './storage.js'
 import Deck from './Deck.jsx'
 import FiltersPanel from './FiltersPanel.jsx'
-import { Spinner } from './ui.jsx'
+import { IconButton, Mark } from './ui.jsx'
 import { useApp } from './ctx.jsx'
 
-const LOW_WATER = 4 // fetch more when this few cards are left
-const BATCH = 12
+const BATCH = 10 // one pile = 10 titles; the next pile only loads when asked
+
+// Dev only: add ?loading to the address to hold the pile loader for testing.
+const HOLD_LOADING = import.meta.env.DEV && new URLSearchParams(window.location.search).has('loading')
 
 const idOf = (c) => `${c.media_type}:${c.tmdb_id}`
 
-export default function Sort({ active, sheetOpen, openDetails }) {
+export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
   const { t, notify, errorText } = useApp()
   const [filters, setFilters] = useState(loadFilters)
   const [stack, setStack] = useState([])
@@ -80,11 +83,6 @@ export default function Sort({ active, sheetOpen, openDetails }) {
     setCanUndo(false)
     fetchMore(true)
   }, [fetchMore])
-
-  // Keep the pile topped up.
-  useEffect(() => {
-    if (stack.length <= LOW_WATER && !loading && !exhausted && !error) fetchMore()
-  }, [stack.length, loading, exhausted, error, fetchMore])
 
   const removeFromStack = (item) => setStack((s) => s.filter((c) => !sameTitle(c, item)))
 
@@ -174,8 +172,20 @@ export default function Sort({ active, sheetOpen, openDetails }) {
 
   return (
     <section className="screen sort" aria-label={t('nav_sort')}>
+      {active && actionsSlot && createPortal(
+        <>
+          <IconButton icon="filter" label={t('filters')} badge={nActive} onClick={() => setShowFilters(true)} />
+          <IconButton icon="undo" label={t('undo')} hot={canUndo} disabled={!canUndo} onClick={undo} />
+        </>,
+        actionsSlot,
+      )}
       <div className="stage">
-        {empty && loading && <Spinner label={t('sort_loading')} />}
+        {(HOLD_LOADING || (empty && loading)) && (
+          <div className="loading-mark" role="status">
+            <Mark loading />
+            <span>{t('sort_loading')}</span>
+          </div>
+        )}
         {empty && !loading && error && (
           <div className="empty">
             <p>{error}</p>
@@ -189,23 +199,15 @@ export default function Sort({ active, sheetOpen, openDetails }) {
             <button type="button" className="btn btn--primary" onClick={() => setShowFilters(true)}>{t('sort_change_filters')}</button>
           </div>
         )}
-        {!empty && <Deck ref={deck} cards={stack} onDecide={onDecide} onDetails={openDetails} />}
-      </div>
-
-      <div className="controls">
-        <div className="stamps">
-          <button type="button" className="stampbtn stampbtn--not_now" disabled={empty} onClick={() => deck.current?.trigger('not_now')}>{t('st_not_now')}</button>
-          <button type="button" className="stampbtn stampbtn--want" disabled={empty} onClick={() => deck.current?.trigger('want')}>{t('st_want')}</button>
-          <button type="button" className="stampbtn stampbtn--watched" disabled={empty} onClick={() => deck.current?.trigger('watched')}>{t('st_watched')}</button>
-        </div>
-        <div className="minor">
-          <button type="button" className="linkbtn" disabled={!canUndo} onClick={undo}>{t('undo')}</button>
-          <button type="button" className="linkbtn" disabled={empty} onClick={() => deck.current?.trigger('details')}>{t('details')}</button>
-          <button type="button" className="linkbtn" onClick={() => setShowFilters(true)}>
-            {t('filters')}{nActive ? ` (${nActive})` : ''}
-          </button>
-        </div>
-        <p className="hint">{t('sort_keys')}</p>
+        {empty && !loading && !error && !exhausted && (
+          <div className="empty">
+            <h2>{t('sort_done_title')}</h2>
+            <p>{t('sort_done_body')}</p>
+            <button type="button" className="btn btn--primary" onClick={() => fetchMore()}>{t('sort_more')}</button>
+            <button type="button" className="btn btn--ghost" onClick={() => setShowFilters(true)}>{t('sort_explore')}</button>
+          </div>
+        )}
+        {!empty && !HOLD_LOADING && <Deck ref={deck} cards={stack} onDecide={onDecide} onDetails={openDetails} />}
       </div>
 
       {showFilters && <FiltersPanel value={filters} onApply={applyFilters} onClose={() => setShowFilters(false)} />}

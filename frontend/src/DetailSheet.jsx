@@ -13,8 +13,12 @@ const PROVIDER_GROUPS = [
 ]
 const REVIEW_PREVIEW = 280
 
+// TMDb gives one JustWatch page per title and region, not a link per service.
+const safeLink = (url) => (typeof url === 'string' && /^https:\/\/([a-z0-9-]+\.)?(themoviedb\.org|justwatch\.com)\//.test(url) ? url : null)
+
 function Providers({ providers, region }) {
   const { t } = useApp()
+  const link = safeLink(providers?.link)
   const groups = providers ? PROVIDER_GROUPS.filter(([k]) => providers[k]?.length) : []
   return (
     <section className="block">
@@ -28,14 +32,61 @@ function Providers({ providers, region }) {
             <ul>
               {providers[kind].map((p) => (
                 <li key={p.name} title={p.name}>
-                  {p.logo ? <img src={p.logo} alt={p.name} loading="lazy" /> : p.name}
+                  {link ? (
+                    <a href={link} target="_blank" rel="noopener noreferrer" aria-label={`${p.name} (${t('d_open_new')})`}>
+                      {p.logo ? <img src={p.logo} alt="" loading="lazy" /> : p.name}
+                    </a>
+                  ) : p.logo ? <img src={p.logo} alt={p.name} loading="lazy" /> : p.name}
                 </li>
               ))}
             </ul>
           </div>
         ))
       )}
+      {link && (
+        <a className="linkbtn" href={link} target="_blank" rel="noopener noreferrer">{t('d_watch_link')}</a>
+      )}
       <p className="muted small">{t('d_providers_credit')}</p>
+    </section>
+  )
+}
+
+function Person({ p }) {
+  return (
+    <li className="person">
+      <span className="person__photo">
+        {p.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span aria-hidden="true">{p.name.slice(0, 1)}</span>}
+      </span>
+      <span className="person__name">{p.name}</span>
+      {p.role && <span className="person__role">{p.role}</span>}
+    </li>
+  )
+}
+
+/** Directors and creators first, then the main cast, as a row of photos. */
+function People({ d }) {
+  const { t } = useApp()
+  const seen = new Set()
+  const people = []
+  for (const c of d.crew || []) {
+    if ((c.job === 'Director' || c.job === 'Creator') && !seen.has(c.id)) {
+      seen.add(c.id)
+      people.push({ ...c, role: t(c.job === 'Director' ? 'role_director' : 'role_creator') })
+    }
+  }
+  for (const c of (d.cast || []).slice(0, 12)) {
+    if (!seen.has(c.id)) {
+      seen.add(c.id)
+      people.push({ ...c, role: c.character })
+    }
+  }
+  if (people.length === 0) return null
+  return (
+    <section className="block">
+      <h3>{t('d_cast')}</h3>
+      <ul className="people" data-hscroll>
+        {people.map((p) => <Person key={p.id} p={p} />)}
+      </ul>
     </section>
   )
 }
@@ -90,21 +141,32 @@ export default function DetailSheet({ item, status, onClose }) {
   const [trailer, setTrailer] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  const [tries, setTries] = useState(0) // bumped by "Try again"
+
   useEffect(() => {
     let live = true
+    let timer
     setD(null)
     setFacts(undefined)
     setFailed(false)
-    api.details(item.media_type, item.tmdb_id)
-      .then((r) => live && setD(r))
-      .catch(() => live && setFailed(true))
+    // A one-off network or TMDb hiccup should not show an error: retry once quietly first.
+    const loadDetails = (retriesLeft) =>
+      api.details(item.media_type, item.tmdb_id)
+        .then((r) => live && setD(r))
+        .catch((e) => {
+          if (!live) return
+          if (retriesLeft > 0 && e?.code !== 'session') timer = setTimeout(() => loadDetails(retriesLeft - 1), 700)
+          else setFailed(true)
+        })
+    loadDetails(1)
     api.facts(item.media_type, item.tmdb_id)
       .then((r) => live && setFacts(r.facts))
       .catch(() => live && setFacts(null))
     return () => {
       live = false
+      clearTimeout(timer)
     }
-  }, [item.media_type, item.tmdb_id])
+  }, [item.media_type, item.tmdb_id, tries])
 
   const act = async (next) => {
     setBusy(true)
@@ -172,7 +234,12 @@ export default function DetailSheet({ item, status, onClose }) {
         <button type="button" className="linkbtn" disabled={busy} onClick={remove}>{t('d_remove')}</button>
       )}
 
-      {failed && <p className="notice notice--error">{t('d_load_failed')}</p>}
+      {failed && (
+        <>
+          <p className="notice notice--error">{t('d_load_failed')}</p>
+          <button type="button" className="btn btn--ghost" onClick={() => setTries((n) => n + 1)}>{t('retry')}</button>
+        </>
+      )}
       {!d && !failed && <Spinner label={t('loading')} />}
 
       {d && (
@@ -199,12 +266,7 @@ export default function DetailSheet({ item, status, onClose }) {
 
           <Providers providers={d.providers} region={d.region} />
 
-          {d.cast?.length > 0 && (
-            <section className="block">
-              <h3>{t('d_cast')}</h3>
-              <p>{d.cast.slice(0, 10).map((c) => c.name).join(', ')}</p>
-            </section>
-          )}
+          <People d={d} />
 
           <Facts facts={facts} />
 

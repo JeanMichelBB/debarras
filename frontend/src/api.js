@@ -1,5 +1,7 @@
 const BASE = (import.meta.env?.VITE_API_URL || 'http://localhost:8002').replace(/\/$/, '')
 const TOKEN_KEY = 'debarras_token'
+// Dev only: add ?slow to the address to wait 1 second before every API call, so loading states stay visible.
+const SLOW_MS = import.meta.env.DEV && new URLSearchParams(window.location.search).has('slow') ? 1000 : 0
 
 export class ApiError extends Error {
   constructor(status, message, code) {
@@ -36,6 +38,7 @@ async function request(path, { method = 'GET', body, form, query, auth = true, r
     headers['Content-Type'] = 'application/json'
     payload = JSON.stringify(body)
   }
+  if (SLOW_MS) await new Promise((r) => setTimeout(r, SLOW_MS))
   let res
   try {
     res = await fetch(url, { method, headers, body: payload })

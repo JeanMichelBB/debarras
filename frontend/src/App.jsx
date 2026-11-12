@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, setOnUnauthorized, setToken } from './api.js'
 import { normalizeLang, translate } from './i18n.js'
-import { isOnboarded, loadLang, saveLang } from './storage.js'
+import { isOnboarded, isTutorialSeen, loadLang, markTutorialSeen, resetTutorial, saveLang } from './storage.js'
 import { AppCtx } from './ctx.jsx'
 import AuthScreen from './AuthScreen.jsx'
 import Onboarding from './Onboarding.jsx'
+import Tutorial from './Tutorial.jsx'
+import AppSkeleton from './Skeleton.jsx'
 import Sort from './Sort.jsx'
 import Lists from './Lists.jsx'
 import Settings from './Settings.jsx'
 import DetailSheet from './DetailSheet.jsx'
-import { Spinner, Toast } from './ui.jsx'
+import { IconButton, Toast } from './ui.jsx'
 
-const TABS = ['sort', 'lists', 'settings']
+// Dev only: add ?skeleton to the address to hold the full-app skeleton for testing.
+const HOLD_SKELETON = import.meta.env.DEV && new URLSearchParams(window.location.search).has('skeleton')
+
+const TABS = ['sort', 'lists']
 
 export default function App() {
   const [lang, setLangState] = useState(() => normalizeLang(loadLang()))
@@ -20,9 +25,15 @@ export default function App() {
   const [bootError, setBootError] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
   const [tab, setTab] = useState('sort')
+  const [showGuide, setShowGuide] = useState(() => !isTutorialSeen())
   const [sheet, setSheet] = useState(null) // { item, status }
   const [toast, setToast] = useState(null)
+  const [tabsSlot, setTabsSlot] = useState(null) // Lists puts its Seen / Want / Not now tabs into the header
+  const [actionsSlot, setActionsSlot] = useState(null) // where the Sort screen puts its top-bar buttons
   const toastTimer = useRef(null)
+  const screensRef = useRef(null)
+  const [topBlur, setTopBlur] = useState(false) // header: solid at the top of a page, blurred once content scrolls under it
+  const [navBlur, setNavBlur] = useState(false) // bottom bar is solid at the top of a page and blurs once you scroll down with content still below
 
   const t = useCallback((key, vars) => translate(lang, key, vars), [lang])
 
@@ -83,6 +94,25 @@ export default function App() {
   }, [token, boot])
 
   useEffect(() => {
+    const box = screensRef.current
+    if (!box) return undefined
+    const check = () => {
+      const scrolled = box.scrollTop > 4
+      setTopBlur(scrolled)
+      setNavBlur(scrolled && box.scrollHeight - box.scrollTop - box.clientHeight > 4)
+    }
+    check()
+    box.addEventListener('scroll', check, { passive: true })
+    const ro = new ResizeObserver(check)
+    ro.observe(box)
+    Array.from(box.children).forEach((c) => ro.observe(c))
+    return () => {
+      box.removeEventListener('scroll', check)
+      ro.disconnect()
+    }
+  }, [tab, user, onboarding, token])
+
+  useEffect(() => {
     document.documentElement.lang = lang
   }, [lang])
 
@@ -99,7 +129,8 @@ export default function App() {
   const ctx = useMemo(() => ({ t, lang, notify, errorText }), [t, lang, notify, errorText])
 
   let body
-  if (!token) body = <AuthScreen onAuthed={onAuthed} />
+  if (HOLD_SKELETON) body = <AppSkeleton />
+  else if (!token) body = <AuthScreen onAuthed={onAuthed} />
   else if (bootError)
     body = (
       <main className="auth">
@@ -108,30 +139,36 @@ export default function App() {
       </main>
     )
   else if (!user)
-    body = (
-      <main className="auth"><Spinner label={t('loading')} /></main>
-    )
+    body = <AppSkeleton />
   else if (onboarding) body = <Onboarding onDone={() => setOnboarding(false)} />
   else
     body = (
-      <div className="shell">
-        <header className="topbar">
-          <span className="wordmark">{t('app_name')}</span>
-        </header>
-        <div className="screens">
-          <div hidden={tab !== 'sort'}>
-            <Sort active={tab === 'sort'} sheetOpen={!!sheet} openDetails={openDetails} />
+      <div className={`shell${tab === 'settings' ? ' shell--settings' : ''}${tab === 'lists' ? ' shell--lists' : ''}`}>
+        <header className={`topbar${topBlur ? ' topbar--blur' : ''}`}>
+          <div className="topbar__row">
+            <span className="wordmark">{t('app_name')}</span>
+            <div className="topbar__actions">
+              <span ref={setActionsSlot} className="topbar__slot" />
+              <IconButton icon="gear" label={t('nav_settings')} on={tab === 'settings'} onClick={() => { setSheet(null); setTab(tab === 'settings' ? 'sort' : 'settings') }} />
+            </div>
           </div>
-          {tab === 'lists' && <Lists openDetails={openDetails} />}
-          {tab === 'settings' && <Settings user={user} setLang={setLang} refreshUser={refreshUser} signOut={signOut} />}
+          {tab === 'lists' && <div ref={setTabsSlot} className="topbar__tabs" />}
+        </header>
+        <div className="screens" ref={screensRef}>
+          <div hidden={tab === 'lists'}>
+            <Sort active={tab === 'sort'} sheetOpen={!!sheet} openDetails={openDetails} actionsSlot={actionsSlot} />
+          </div>
+          {tab === 'lists' && <Lists openDetails={openDetails} tabsSlot={tabsSlot} />}
+          {tab === 'settings' && <Settings user={user} setLang={setLang} refreshUser={refreshUser} signOut={signOut} onShowGuide={() => { resetTutorial(); setShowGuide(true); setTab('sort') }} />}
         </div>
-        <nav className="nav" aria-label="Main">
+        <nav className={`nav${navBlur ? ' nav--blur' : ''}`} aria-label="Main">
           {TABS.map((id) => (
-            <button key={id} type="button" className={tab === id ? 'on' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
+            <button key={id} type="button" className={tab === id ? 'on' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => { setSheet(null); setTab(id) }}>
               {t(`nav_${id}`)}
             </button>
           ))}
         </nav>
+        {showGuide && tab === 'sort' && <Tutorial onDone={() => { markTutorialSeen(); setShowGuide(false) }} />}
         {sheet && <DetailSheet item={sheet.item} status={sheet.status} onClose={closeSheet} />}
       </div>
     )

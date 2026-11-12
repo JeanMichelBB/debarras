@@ -21,6 +21,7 @@ from database.models import TitleCache, utcnow
 BASE = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p"
 LANGS = {"en": "en-US", "fr": "fr-CA"}
+SLIM_VERSION = 3  # bump when _slim keeps new fields: older cached rows are refetched on open
 APPEND = "videos,credits,external_ids,keywords,reviews,watch/providers"
 
 _client: httpx.AsyncClient | None = None
@@ -79,6 +80,9 @@ async def _fetch(path: str, params: dict, lang: str) -> dict:
             except ValueError:
                 delay = 1.0
             await asyncio.sleep(min(delay, 5.0))
+            continue
+        if r.status_code >= 500 and attempt < 2:  # TMDb hiccup: try again before giving up
+            await asyncio.sleep(0.5 * (attempt + 1))
             continue
         if r.status_code == 404:
             raise HTTPException(404, "not found on TMDb")
@@ -158,6 +162,20 @@ def _providers(raw: dict) -> dict:
     return out
 
 
+def _crew(raw: dict, credits: dict, jobs: set[str]) -> list[dict]:
+    """Directors, writers and creators. TV shows list their creators in `created_by`, not in credits."""
+    out = [
+        {"id": c["id"], "name": c["name"], "job": c.get("job"), "photo": poster_url(c.get("profile_path"), "w185")}
+        for c in credits.get("crew", []) if c.get("job") in jobs
+    ]
+    have = {(c["id"], c["job"]) for c in out}
+    for c in raw.get("created_by") or []:
+        if (c["id"], "Creator") not in have:
+            out.append({"id": c["id"], "name": c["name"], "job": "Creator",
+                        "photo": poster_url(c.get("profile_path"), "w185")})
+    return out
+
+
 def _slim(raw: dict, media_type: str) -> dict:
     """Keep only what the app uses, so title_cache rows stay small."""
     ext = raw.get("external_ids") or {}
@@ -179,15 +197,14 @@ def _slim(raw: dict, media_type: str) -> dict:
     return {
         **{k: raw.get(k) for k in keep},
         "media_type": media_type,
+        "v": SLIM_VERSION,
         "imdb_id": raw.get("imdb_id") or ext.get("imdb_id"),
         "cast": [
-            {"id": c["id"], "name": c["name"], "character": c.get("character")}
+            {"id": c["id"], "name": c["name"], "character": c.get("character"),
+             "photo": poster_url(c.get("profile_path"), "w185")}
             for c in credits.get("cast", [])[:15]
         ],
-        "crew": [
-            {"id": c["id"], "name": c["name"], "job": c.get("job")}
-            for c in credits.get("crew", []) if c.get("job") in crew_jobs
-        ],
+        "crew": _crew(raw, credits, crew_jobs),
         "videos": [{"key": v["key"], "name": v.get("name"), "type": v.get("type")} for v in videos[:3]],
         "keywords": [{"id": k["id"], "name": k["name"]} for k in keywords[:15]],
         "reviews": [
@@ -204,7 +221,7 @@ def _slim(raw: dict, media_type: str) -> dict:
 
 async def get_details(db: Session, media_type: str, tmdb_id: int, lang: str = "en") -> dict:
     row = db.get(TitleCache, (media_type, tmdb_id, lang))
-    if row and row.refreshed_at > utcnow() - timedelta(days=config.CACHE_TTL_DAYS):
+    if row and row.data.get("v") == SLIM_VERSION and row.refreshed_at > utcnow() - timedelta(days=config.CACHE_TTL_DAYS):
         return row.data
 
     try:

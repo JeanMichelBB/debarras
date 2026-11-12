@@ -4,7 +4,7 @@ import { api } from './api.js'
 import { useApp } from './ctx.jsx'
 import RecoveryCodes from './RecoveryCodes.jsx'
 import Credits from './Credits.jsx'
-import { Stamp } from './ui.jsx'
+import { Mark } from './ui.jsx'
 
 const cancelled = (e) => e?.name === 'NotAllowedError' || e?.name === 'AbortError'
 
@@ -66,13 +66,7 @@ export default function AuthScreen({ onAuthed }) {
 
   return (
     <main className="auth">
-      <div className="auth__pile" aria-hidden="true">
-        <span className="auth__sheet auth__sheet--3" />
-        <span className="auth__sheet auth__sheet--2" />
-        <span className="auth__sheet auth__sheet--1">
-          <Stamp status="watched" className="auth__stamp" />
-        </span>
-      </div>
+      <Mark />
 
       <h1 className="auth__word">{t('app_name')}</h1>
       <p className="auth__title">{t('tagline_title')}</p>

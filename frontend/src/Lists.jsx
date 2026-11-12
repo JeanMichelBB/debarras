@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from './api.js'
 import { EVT_SWIPE, EVT_UNDO } from './actions.js'
-import { Poster, Spinner, Stamp } from './ui.jsx'
+import { Poster, Spinner } from './ui.jsx'
 import { downloadBlob } from './RecoveryCodes.jsx'
 import { useApp } from './ctx.jsx'
 
@@ -73,7 +74,10 @@ function ImportPanel({ onDone }) {
   )
 }
 
-export default function Lists({ openDetails }) {
+// Dev only: add ?loading to the address to hold the list skeleton for testing.
+const HOLD_LOADING = import.meta.env.DEV && new URLSearchParams(window.location.search).has('loading')
+
+export default function Lists({ openDetails, tabsSlot }) {
   const { t, notify, errorText } = useApp()
   const [tab, setTab] = useState('watched')
   const [q, setQ] = useState('')
@@ -143,37 +147,43 @@ export default function Lists({ openDetails }) {
 
   return (
     <section className="screen lists" aria-label={t('nav_lists')}>
-      <div className="tabs" role="tablist">
-        {TABS.map((s) => (
-          <button key={s} type="button" role="tab" aria-selected={tab === s} className={tab === s ? 'on' : ''} onClick={() => setTab(s)}>
-            {t(`l_${s}`)}
-            {stats && <span className="tabs__n">{stats[s]}</span>}
-          </button>
-        ))}
-      </div>
+      {tabsSlot && createPortal(
+        <div className="tabs" role="tablist">
+          {TABS.map((s) => (
+            <button key={s} type="button" role="tab" aria-selected={tab === s} className={tab === s ? 'on' : ''} onClick={() => setTab(s)}>
+              {t(`l_${s}`)}
+              {stats && <span className="tabs__n">{stats[s]}</span>}
+            </button>
+          ))}
+        </div>,
+        tabsSlot,
+      )}
 
       <div className="lists__tools">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('l_search')} aria-label={t('l_search')} />
         <button type="button" className="btn btn--ghost" onClick={doExport} disabled={!total}>{t('l_export')}</button>
       </div>
-      {total > 0 && <p className="muted small">{t('l_total', { n: total })}. {t('l_export_help')}</p>}
 
-      {items.length === 0 && !loading && <p className="empty-note">{t('l_empty')}</p>}
+      {items.length === 0 && !loading && !HOLD_LOADING && <p className="empty-note">{t('l_empty')}</p>}
 
       <ul className="grid">
-        {items.map((it) => (
+        {!HOLD_LOADING && items.map((it) => (
           <li key={`${it.media_type}:${it.tmdb_id}`}>
             <button type="button" className="tile" onClick={() => openDetails(it, it.status)} aria-label={it.title}>
               <Poster src={it.poster} title={it.title} />
               {it.status === 'watched' && it.rating === 3 && <span className="tile__loved" aria-hidden="true" />}
               <span className="tile__title">{it.title}</span>
-              {tab !== it.status && <Stamp status={it.status} className="tile__stamp" />}
             </button>
           </li>
         ))}
       </ul>
 
-      {loading && <Spinner label={t('loading')} />}
+      {(HOLD_LOADING || (loading && items.length === 0)) && (
+        <ul className="grid" role="status" aria-busy="true" aria-label={t('loading')}>
+          {Array.from({ length: 9 }, (_, i) => <li key={i}><span className="sk sk--tile" /></li>)}
+        </ul>
+      )}
+      {loading && items.length > 0 && <Spinner label={t('loading')} />}
       {!loading && items.length < total && (
         <button type="button" className="btn btn--ghost btn--block" onClick={() => load(false)}>{t('l_more')}</button>
       )}

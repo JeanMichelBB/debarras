@@ -15,7 +15,7 @@ const REGIONS = [
 ]
 const LANG_NAMES = { en: 'English', fr: 'Français' }
 
-export default function Settings({ user, setLang, refreshUser, signOut }) {
+export default function Settings({ user, setLang, refreshUser, signOut, onShowGuide }) {
   const { t, lang, notify, errorText } = useApp()
   const [passkeys, setPasskeys] = useState([])
   const [codes, setCodes] = useState(null)
@@ -122,6 +122,10 @@ export default function Settings({ user, setLang, refreshUser, signOut }) {
         <h2>{t('s_codes')}</h2>
         <p className="muted">{t('s_codes_left', { n: user.recovery_codes_left })}</p>
         <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setConfirmCodes(true)}>{t('s_codes_new')}</button>
+      </div>
+
+      <div className="setting">
+        <button type="button" className="btn btn--ghost" onClick={onShowGuide}>{t('s_guide')}</button>
       </div>
 
       <div className="setting">

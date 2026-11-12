@@ -6,6 +6,9 @@ import '@fontsource/big-shoulders-display/900'
 import '@fontsource-variable/instrument-sans'
 import './styles.css'
 import App from './App.jsx'
+import { lockPage } from './lockPage.js'
+
+lockPage()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
