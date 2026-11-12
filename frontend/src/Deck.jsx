@@ -126,6 +126,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
               {top.year && <span>{top.year}</span>}
               <span>{top.media_type === 'tv' ? t('type_tv') : t('type_movie')}</span>
               {top.vote_average ? <span>{top.vote_average.toFixed(1)} / 10</span> : null}
+              {top.genres?.length ? <span>{top.genres.join(' · ')}</span> : null}
             </p>
             {top.reason && <p className="card__reason">{top.reason}</p>}
           </div>

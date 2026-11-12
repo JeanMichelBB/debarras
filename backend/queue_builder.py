@@ -168,6 +168,12 @@ def _load_state(db: Session, user_id: int, seed_count: int) -> tuple[set[tuple[s
     return decided, seeds
 
 
+async def _genre_names(lang: str) -> dict[int, str]:
+    """Genre id -> name for movies and TV (cached for a day, so this costs no extra call in practice)."""
+    lists = await asyncio.gather(*(_safe(tmdb.tmdb_get(f"/genre/{k}/list", lang=lang)) for k in ("movie", "tv")))
+    return {g["id"]: g["name"] for res in lists for g in (res or {}).get("genres", [])}
+
+
 async def build_queue(
     db: Session, user: User, limit: int, filters: Filters, page: int = 1, exclude: set[tuple[str, int]] | None = None,
     source: str = "mix", like: tuple[str, int] | None = None, shuffle: bool = False, person: int | None = None, company: int | None = None,
@@ -181,6 +187,7 @@ async def build_queue(
         filters, source = Filters(), "related"
     decided, found = await asyncio.to_thread(_load_state, db, user.id, 0 if like or source == "wild" else SEED_COUNT)
     skip = decided | (exclude or set())
+    genre_names = await _genre_names(lang)
 
     seeds = [SimpleNamespace(media_type=like[0], tmdb_id=like[1])] if like else found
     if like:
@@ -230,6 +237,7 @@ async def build_queue(
             if not raw.get("poster_path") or not is_released(raw) or (raw.get("vote_count") or 0) < MIN_VOTES or not filters.accepts(raw, c["media_type"]):
                 continue
             seen.add(key)
+            c["genres"] = [genre_names[g] for g in (raw.get("genre_ids") or []) if g in genre_names][:2]
             queue.append(c)
 
     take(candidates)

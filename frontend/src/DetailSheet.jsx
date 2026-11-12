@@ -275,7 +275,10 @@ export default function DetailSheet({ item, status, onClose, onSimilar, onPerson
           </button>
         ))}
       </div>
-      <button type="button" className="btn btn--ghost btn--block" onClick={() => onSimilar(item)}>{t('d_similar')}</button>
+      <button type="button" className="btn btn--ghost btn--block btn--withicon" onClick={() => onSimilar(item)}>
+        <span>{t('d_similar')}</span>
+        <img src="/logo-mark-2.svg" alt="" />
+      </button>
       {cur && (
         <button type="button" className="linkbtn" disabled={busy} onClick={remove}>{t('d_remove')}</button>
       )}

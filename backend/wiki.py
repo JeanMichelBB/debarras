@@ -119,7 +119,8 @@ def is_game_article(extract: str) -> bool:
 
 async def fetch_facts(imdb_id: str, lang: str) -> dict | None:
     titles = await _wikipedia_titles(imdb_id)
-    for code in [lang] + [c for c in ("en", "fr") if c != lang]:
+    # A French reader may fall back to the English article; an English reader never gets French text.
+    for code in [lang] + (["en"] if lang != "en" else []):
         if code not in titles:
             continue
         text = await _extract(code, titles[code])
@@ -145,7 +146,10 @@ async def get_facts(db: Session, media_type: str, tmdb_id: int, imdb_id: str | N
     """Cached facts (including 'no article' results). Network errors are not cached."""
     row = db.get(FactCache, (media_type, tmdb_id, lang))
     if row and row.refreshed_at > utcnow() - timedelta(days=config.FACTS_TTL_DAYS):
-        return row.data.get("facts")
+        cached = row.data.get("facts")
+        # Older rows may hold a French fallback for an English reader: refetch those.
+        if not (cached and lang == "en" and cached.get("lang") != "en"):
+            return cached
     if not imdb_id:
         return None
     try:

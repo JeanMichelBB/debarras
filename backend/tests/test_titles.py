@@ -255,3 +255,24 @@ def test_login_posters_are_public_random_and_distinct(client):
     assert len(posters) == 3 and len(set(posters)) == 3
     seen = {tuple(client.get("/public/login-posters").json()["posters"]) for _ in range(8)}
     assert len(seen) > 1  # not always the same three
+
+
+def test_queue_cards_carry_genre_names(client, user):
+    cards = queue(client, user)["cards"]
+    assert cards and all(c["genres"] == ["Drama"] for c in cards)
+
+
+def test_english_reader_never_gets_french_wikipedia_text(monkeypatch):
+    import asyncio
+
+    import wiki
+
+    async def titles(imdb_id):
+        return {"fr": "Power (série)"}  # only a French article exists
+
+    async def extract(lang, title):
+        raise AssertionError("must not fetch the French article for an English reader")
+
+    monkeypatch.setattr(wiki, "_wikipedia_titles", titles)
+    monkeypatch.setattr(wiki, "_extract", extract)
+    assert asyncio.run(wiki.fetch_facts("tt1", "en")) is None

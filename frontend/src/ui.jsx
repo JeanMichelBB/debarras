@@ -172,7 +172,7 @@ export function Sheet({ onClose, title, children, wide = false, head = null, cov
       <div className="sheet-backdrop" onClick={onClose} />
       <motion.div
         ref={panel}
-        className={`sheet ${wide ? 'sheet--wide' : ''}${tall ? ' sheet--tall' : ''}`}
+        className={`sheet ${wide ? 'sheet--wide' : ''}${tall ? ' sheet--tall' : ''}${head ? ' sheet--headed' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -188,10 +188,12 @@ export function Sheet({ onClose, title, children, wide = false, head = null, cov
         dragElastic={{ top: 0, bottom: 0.6 }}
         onDragEnd={(_, info) => (info.offset.y > 120 || info.velocity.y > 600) && onClose()}
       >
-        <div className="sheet__handle" onPointerDown={(e) => controls.start(e)}>
-          <span />
+        <div className="sheet__top">
+          <div className="sheet__handle" onPointerDown={(e) => controls.start(e)}>
+            <span />
+          </div>
+          {head}
         </div>
-        {head}
         <div className="sheet__body">{children}</div>
       </motion.div>
     </div>
