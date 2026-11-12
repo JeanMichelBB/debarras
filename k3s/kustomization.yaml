@@ -13,5 +13,5 @@ images:
     newTag: 0000000003-97dbe077b0afd9830ad129420eba1d34553ef7cd
     newName: jeanmichelbb/debarras-fe
   - name: jeanmichelbb/debarras-be
-    newTag: 0000000002-fe9ef550c9acfc089ae403976b46246c6db962a5
+    newTag: 0000000003-97dbe077b0afd9830ad129420eba1d34553ef7cd
     newName: jeanmichelbb/debarras-be
