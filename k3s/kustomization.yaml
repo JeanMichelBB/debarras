@@ -10,7 +10,7 @@ resources:
 
 images:
   - name: jeanmichelbb/debarras-fe
-    newTag: 0000000003-97dbe077b0afd9830ad129420eba1d34553ef7cd
+    newTag: 0000000004-f9e2f72e18c3974f95e66f452f30bf7db6e94a66
     newName: jeanmichelbb/debarras-fe
   - name: jeanmichelbb/debarras-be
     newTag: 0000000003-97dbe077b0afd9830ad129420eba1d34553ef7cd
