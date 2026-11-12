@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { commitSwipe, removeSwipe } from './actions.js'
 import { Poster, Sheet, Spinner } from './ui.jsx'
+import { motion } from 'framer-motion'
+import { Expandable, fadeUp } from './motion.jsx'
+import { TitleRow } from './Explore.jsx'
 import { useApp } from './ctx.jsx'
 
 const PROVIDER_GROUPS = [
@@ -21,7 +24,7 @@ function Providers({ providers, region }) {
   const link = safeLink(providers?.link)
   const groups = providers ? PROVIDER_GROUPS.filter(([k]) => providers[k]?.length) : []
   return (
-    <section className="block">
+    <motion.section className="block" {...fadeUp}>
       <h3>{t('d_where', { region })}</h3>
       {groups.length === 0 ? (
         <p className="muted">{t('d_no_providers', { region })}</p>
@@ -47,24 +50,26 @@ function Providers({ providers, region }) {
         <a className="linkbtn" href={link} target="_blank" rel="noopener noreferrer">{t('d_watch_link')}</a>
       )}
       <p className="muted small">{t('d_providers_credit')}</p>
-    </section>
+    </motion.section>
   )
 }
 
-function Person({ p }) {
+function Person({ p, onPerson }) {
   return (
     <li className="person">
-      <span className="person__photo">
-        {p.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span aria-hidden="true">{p.name.slice(0, 1)}</span>}
-      </span>
-      <span className="person__name">{p.name}</span>
-      {p.role && <span className="person__role">{p.role}</span>}
+      <button type="button" className="person__btn" onClick={() => onPerson(p)}>
+        <span className="person__photo">
+          {p.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span aria-hidden="true">{p.name.slice(0, 1)}</span>}
+        </span>
+        <span className="person__name">{p.name}</span>
+        {p.role && <span className="person__role">{p.role}</span>}
+      </button>
     </li>
   )
 }
 
 /** Directors and creators first, then the main cast, as a row of photos. */
-function People({ d }) {
+function People({ d, onPerson }) {
   const { t } = useApp()
   const seen = new Set()
   const people = []
@@ -82,19 +87,58 @@ function People({ d }) {
   }
   if (people.length === 0) return null
   return (
-    <section className="block">
+    <motion.section className="block" {...fadeUp}>
       <h3>{t('d_cast')}</h3>
       <ul className="people" data-hscroll>
-        {people.map((p) => <Person key={p.id} p={p} />)}
+        {people.map((p) => <Person key={p.id} p={p} onPerson={onPerson} />)}
       </ul>
-    </section>
+    </motion.section>
+  )
+}
+
+/** Studios behind the title. Tap one to see its popular titles right here, or to build a pile from it. */
+function Studios({ companies, onOpen, onMore }) {
+  const { t } = useApp()
+  const [sel, setSel] = useState(null)
+  const [info, setInfo] = useState(null)
+  useEffect(() => {
+    if (!sel) return undefined
+    let live = true
+    setInfo(null)
+    api.company(sel.id).then((r) => live && setInfo(r)).catch(() => live && setInfo(false))
+    return () => { live = false }
+  }, [sel])
+  if (!companies?.length) return null
+  return (
+    <motion.section className="block" {...fadeUp}>
+      <h3>{t('d_studio')}</h3>
+      <ul className="studios">
+        {companies.map((c) => (
+          <li key={c.id}>
+            <button type="button" className={`studio${sel?.id === c.id ? ' on' : ''}`} aria-pressed={sel?.id === c.id} onClick={() => setSel(sel?.id === c.id ? null : c)}>
+              {c.logo ? <img src={c.logo} alt="" loading="lazy" /> : null}
+              <span>{c.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {sel && info === null && <Spinner label={t('loading')} />}
+      {sel && info && (
+        <>
+          <p className="muted">{t('d_studio_titles', { name: sel.name })}</p>
+          <TitleRow items={info.titles} onOpen={onOpen} />
+          <button type="button" className="btn btn--ghost btn--block" onClick={() => onMore(sel)}>{t('d_more_from', { name: sel.name })}</button>
+        </>
+      )}
+      {sel && info === false && <p className="muted">{t('d_load_failed')}</p>}
+    </motion.section>
   )
 }
 
 function Facts({ facts }) {
   const { t } = useApp()
   return (
-    <section className="block">
+    <motion.section className="block" {...fadeUp}>
       <h3>{t('d_facts')}</h3>
       {facts === undefined && <Spinner label={t('loading')} />}
       {facts === null && <p className="muted">{t('d_facts_none')}</p>}
@@ -111,7 +155,7 @@ function Facts({ facts }) {
           {facts.fallback_language ? ` ${t('d_facts_fallback')}` : ''}
         </p>
       )}
-    </section>
+    </motion.section>
   )
 }
 
@@ -121,7 +165,7 @@ function Review({ r }) {
   const long = r.content.length > REVIEW_PREVIEW
   return (
     <blockquote className="review">
-      <p>{open || !long ? r.content : `${r.content.slice(0, REVIEW_PREVIEW).trimEnd()}…`}</p>
+      <Expandable open={open} collapsed={96}><p>{r.content}</p></Expandable>
       <footer>
         {r.author}
         {r.rating ? `, ${r.rating}/10` : ''}
@@ -133,7 +177,7 @@ function Review({ r }) {
   )
 }
 
-export default function DetailSheet({ item, status, onClose }) {
+export default function DetailSheet({ item, status, onClose, onSimilar, onPerson, onCompany, onOpen, head, covered }) {
   const { t, notify, errorText } = useApp()
   const [d, setD] = useState(null)
   const [facts, setFacts] = useState(undefined)
@@ -191,6 +235,7 @@ export default function DetailSheet({ item, status, onClose }) {
     }
   }
 
+  const cur = d ? d.my_status : status // the server knows the saved status even when the sheet was opened from history
   const runtime = d?.runtime ? t('d_runtime', { n: d.runtime }) : null
   const seasons = d?.number_of_seasons ? (d.number_of_seasons === 1 ? t('d_season') : t('d_seasons', { n: d.number_of_seasons })) : null
   const director = d?.crew?.filter((c) => c.job === 'Director').map((c) => c.name)
@@ -198,7 +243,7 @@ export default function DetailSheet({ item, status, onClose }) {
   const trailerKey = d?.videos?.[0]?.key
 
   return (
-    <Sheet onClose={onClose} title={item.title} wide>
+    <Sheet onClose={onClose} title={item.title} wide head={head} covered={covered}>
       <header className="detail__head">
         <div className="detail__poster"><Poster src={item.poster} title={item.title} eager /></div>
         <div>
@@ -221,8 +266,8 @@ export default function DetailSheet({ item, status, onClose }) {
           <button
             key={s}
             type="button"
-            className={`stampbtn stampbtn--${s} ${status === s ? 'is-current' : ''}`}
-            aria-pressed={status === s}
+            className={`stampbtn stampbtn--${s} ${cur === s ? 'is-current' : ''}`}
+            aria-pressed={cur === s}
             disabled={busy}
             onClick={() => act(s)}
           >
@@ -230,7 +275,8 @@ export default function DetailSheet({ item, status, onClose }) {
           </button>
         ))}
       </div>
-      {status && (
+      <button type="button" className="btn btn--ghost btn--block" onClick={() => onSimilar(item)}>{t('d_similar')}</button>
+      {cur && (
         <button type="button" className="linkbtn" disabled={busy} onClick={remove}>{t('d_remove')}</button>
       )}
 
@@ -248,7 +294,7 @@ export default function DetailSheet({ item, status, onClose }) {
           {d.overview && <p className="detail__overview">{d.overview}</p>}
 
           {trailerKey && (
-            <section className="block">
+            <motion.section className="block" {...fadeUp}>
               {trailer ? (
                 <div className="trailer">
                   <iframe
@@ -261,20 +307,21 @@ export default function DetailSheet({ item, status, onClose }) {
               ) : (
                 <button type="button" className="btn btn--ghost" onClick={() => setTrailer(true)}>{t('d_trailer')}</button>
               )}
-            </section>
+            </motion.section>
           )}
 
           <Providers providers={d.providers} region={d.region} />
 
-          <People d={d} />
+          <People d={d} onPerson={onPerson} />
+          <Studios companies={d.companies} onOpen={onOpen} onMore={onCompany} />
 
           <Facts facts={facts} />
 
           {d.reviews?.length > 0 && (
-            <section className="block">
+            <motion.section className="block" {...fadeUp}>
               <h3>{t('d_reviews')}</h3>
               {d.reviews.slice(0, 3).map((r, i) => <Review key={i} r={r} />)}
-            </section>
+            </motion.section>
           )}
         </>
       )}

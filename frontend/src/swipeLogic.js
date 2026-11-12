@@ -61,7 +61,7 @@ export const EMPTY_FILTERS = { media_type: 'all', genres: [], year_min: '', year
 export function countActiveFilters(f) {
   return (
     (f.media_type && f.media_type !== 'all' ? 1 : 0) +
-    (f.genres?.length ? 1 : 0) +
+    (f.genres?.length || 0) +
     (f.year_min ? 1 : 0) +
     (f.year_max ? 1 : 0) +
     (f.min_rating ? 1 : 0)

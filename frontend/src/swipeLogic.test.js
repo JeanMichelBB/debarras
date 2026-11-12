@@ -54,4 +54,5 @@ test('filter params only include what is set', () => {
 test('active filter count', () => {
   assert.equal(countActiveFilters(EMPTY_FILTERS), 0)
   assert.equal(countActiveFilters({ ...EMPTY_FILTERS, media_type: 'movie', genres: [1], min_rating: '6' }), 3)
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, genres: [1, 2, 3] }), 3)
 })

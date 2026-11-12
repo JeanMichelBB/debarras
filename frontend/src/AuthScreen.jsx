@@ -1,16 +1,32 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { browserSupportsWebAuthn, startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import { api } from './api.js'
 import { useApp } from './ctx.jsx'
 import RecoveryCodes from './RecoveryCodes.jsx'
-import Credits from './Credits.jsx'
-import { Mark } from './ui.jsx'
+import { AboutSheet } from './Credits.jsx'
+import { AnimatePresence, motion } from 'framer-motion'
+import { soft } from './motion.jsx'
+import { CardGrid, Mark, Sheet } from './ui.jsx'
 
 const cancelled = (e) => e?.name === 'NotAllowedError' || e?.name === 'AbortError'
 
+// If the posters can't be fetched, these three (TMDb poster paths) are used.
+const FALLBACK_POSTERS = ['/qJ2tW6WMUDux911r6m7haRef0WH.jpg', '/jSziioSwPVrOy9Yow3XhWIBDjq1.jpg', '/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg']
+
 export default function AuthScreen({ onAuthed }) {
   const { t, errorText } = useApp()
-  const [mode, setMode] = useState('home') // home | recover | codes
+  const [mode, setMode] = useState('home') // home | codes
+  const [posters, setPosters] = useState(null) // null until the random picks arrive, so no poster flashes first
+  const [recoverOpen, setRecoverOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api.loginPosters().then((r) => live && setPosters(r.posters?.length ? r.posters : FALLBACK_POSTERS)).catch(() => live && setPosters(FALLBACK_POSTERS))
+    return () => {
+      live = false
+    }
+  }, [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(null) // { token, codes } until the codes are saved
@@ -52,6 +68,7 @@ export default function AuthScreen({ onAuthed }) {
     e.preventDefault()
     run(async () => {
       const res = await api.recover(code.trim())
+      setRecoverOpen(false)
       onAuthed({ token: res.access_token, recovered: true })
     })
   }
@@ -64,53 +81,64 @@ export default function AuthScreen({ onAuthed }) {
     )
   }
 
+  const icon = (d) => (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+  )
+
   return (
-    <main className="auth">
-      <Mark />
+    <main className="auth auth--login">
+      <div className="auth__top">
+        <span className="wordmark">{t('app_name')}</span>
+        <button type="button" className="linkbtn" onClick={() => setAboutOpen(true)}>{t('auth_about')}</button>
+      </div>
 
-      <h1 className="auth__word">{t('app_name')}</h1>
-      <p className="auth__title">{t('tagline_title')}</p>
-      <p className="auth__body">{t('tagline_body')}</p>
+      <div className="auth__hero">
+        <Mark hero posters={posters} />
+        <p className="auth__title">{t('tagline_title')}</p>
+        {!supported && <p className="notice notice--error">{t('passkey_unsupported')}</p>}
+        {error && <p className="notice notice--error" role="alert">{error}</p>}
+      </div>
 
-      {mode === 'home' && (
-        <div className="auth__actions">
-          {!supported && <p className="notice notice--error">{t('passkey_unsupported')}</p>}
-          <button type="button" className="btn btn--primary btn--block" disabled={busy || !supported} onClick={register}>
-            {t('create_account')}
-          </button>
-          <button type="button" className="btn btn--ghost btn--block" disabled={busy || !supported} onClick={signIn}>
-            {t('sign_in')}
-          </button>
-          <button type="button" className="linkbtn" onClick={() => { setError(null); setMode('recover') }}>
-            {t('use_recovery')}
-          </button>
-          <p className="hint">{t('passkey_hint')}</p>
-        </div>
-      )}
+      <p className="auth__pk">{t('auth_passkey')}</p>
 
-      {mode === 'recover' && (
-        <form className="auth__actions" onSubmit={recover}>
-          <label className="field">
-            <span>{t('recovery_enter')}</span>
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="XXXX-XXXX-XXXX-XXXX"
-              autoComplete="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              required
-            />
-          </label>
-          <button type="submit" className="btn btn--primary btn--block" disabled={busy || code.trim().length < 8}>
-            {t('recovery_signin')}
-          </button>
-          <button type="button" className="linkbtn" onClick={() => { setError(null); setMode('home') }}>{t('back')}</button>
-        </form>
-      )}
+      <motion.nav className="dock dock--auth" aria-label={t('app_name')} initial={{ y: 90, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={soft}>
+        <button type="button" className="dock__btn dock__btn--main" disabled={busy || !supported} onClick={register}>
+          {icon('M12 5v14M5 12h14')}
+          <span>{t('auth_create')}</span>
+        </button>
+        <button type="button" className="dock__btn" disabled={busy || !supported} onClick={signIn}>
+          {icon('M12 11a3 3 0 0 1 3 3v3M9 17v-3a3 3 0 0 1 3-3M7 20v-6a5 5 0 0 1 10 0v2M5 10a7 7 0 0 1 14 0')}
+          <span>{t('auth_signin')}</span>
+        </button>
+      </motion.nav>
+      <button type="button" className="linkbtn auth__recover" onClick={() => { setError(null); setRecoverOpen(true) }}>{t('auth_trouble')}</button>
 
-      {error && <p className="notice notice--error" role="alert">{error}</p>}
-      <Credits />
+      <AnimatePresence>
+        {recoverOpen && (
+          <Sheet key="recover" onClose={() => setRecoverOpen(false)} title={t('use_recovery')}>
+            <h2 className="sheet__title">{t('use_recovery')}</h2>
+            <form className="auth__actions" onSubmit={recover}>
+              <label className="field">
+                <span>{t('recovery_enter')}</span>
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  required
+                />
+              </label>
+              {error && <p className="notice notice--error" role="alert">{error}</p>}
+              <button type="submit" className="btn btn--primary btn--block" disabled={busy || code.trim().length < 8}>
+                {t('recovery_signin')}
+              </button>
+            </form>
+          </Sheet>
+        )}
+        {aboutOpen && <AboutSheet key="about" onClose={() => setAboutOpen(false)} />}
+      </AnimatePresence>
     </main>
   )
 }

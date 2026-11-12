@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 import pymysql
@@ -8,10 +9,12 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 import auth
 import config
+import login_posters
 import routes_io
 import routes_swipes
 import routes_titles
-from database.connection import DATABASE_URL, engine
+import tmdb
+from database.connection import DATABASE_URL, SessionLocal, engine
 from database.models import Base
 from tracing import setup_tracing
 
@@ -38,7 +41,12 @@ def init_database() -> None:
 async def lifespan(app: FastAPI):
     init_database()
     Base.metadata.create_all(bind=engine)
+    with SessionLocal() as db:
+        login_posters.seed(db)
+    warm = asyncio.create_task(tmdb.warm_loop()) if config.TMDB_WARM else None
     yield
+    if warm:
+        warm.cancel()
 
 
 setup_tracing("debarras-backend", engine)

@@ -246,3 +246,12 @@ def test_is_game_article():
     assert is_game_article("Halo Wars is a 2009 real-time strategy video game developed by Ensemble Studios.\n\nGameplay")
     assert not is_game_article("Tomb Raider is a 2018 action film based on the video game.\n\nPlot")
     assert not is_game_article("Twin Peaks is an American television series.")
+
+
+def test_login_posters_are_public_random_and_distinct(client):
+    r = client.get("/public/login-posters")  # no sign-in
+    assert r.status_code == 200
+    posters = r.json()["posters"]
+    assert len(posters) == 3 and len(set(posters)) == 3
+    seen = {tuple(client.get("/public/login-posters").json()["posters"]) for _ in range(8)}
+    assert len(seen) > 1  # not always the same three

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import { startRegistration } from '@simplewebauthn/browser'
 import { api } from './api.js'
 import { LANGS } from './i18n.js'
@@ -15,7 +16,7 @@ const REGIONS = [
 ]
 const LANG_NAMES = { en: 'English', fr: 'Français' }
 
-export default function Settings({ user, setLang, refreshUser, signOut, onShowGuide }) {
+export default function Settings({ user, setLang, refreshUser, signOut, onShowGuide, onHistory, onClose, covered }) {
   const { t, lang, notify, errorText } = useApp()
   const [passkeys, setPasskeys] = useState([])
   const [codes, setCodes] = useState(null)
@@ -86,7 +87,16 @@ export default function Settings({ user, setLang, refreshUser, signOut, onShowGu
   const word = t('s_delete_word')
 
   return (
-    <section className="screen settings" aria-label={t('nav_settings')}>
+    <>
+    <Sheet onClose={onClose} title={t('nav_settings')} covered={covered}>
+      <h2 className="sheet__title">{t('nav_settings')}</h2>
+      <div className="setting">
+        <button type="button" className="rowlink" onClick={onHistory}>
+          <span>{t('h_title')}</span>
+          <small>{t('h_hint')}</small>
+        </button>
+      </div>
+
       <div className="setting">
         <label htmlFor="lang">{t('s_language')}</label>
         <select id="lang" value={lang} disabled={busy} onChange={(e) => changeLang(e.target.value)}>
@@ -143,8 +153,11 @@ export default function Settings({ user, setLang, refreshUser, signOut, onShowGu
         <Credits />
       </div>
 
+    </Sheet>
+
+      <AnimatePresence>
       {confirmCodes && (
-        <Sheet onClose={() => setConfirmCodes(false)} title={t('s_codes_new')}>
+        <Sheet key="confirm" onClose={() => setConfirmCodes(false)} title={t('s_codes_new')}>
           <h2 className="sheet__title">{t('s_codes_new')}</h2>
           <p>{t('s_codes_warn')}</p>
           <div className="actions">
@@ -155,13 +168,13 @@ export default function Settings({ user, setLang, refreshUser, signOut, onShowGu
       )}
 
       {codes && (
-        <Sheet onClose={() => {}} title={t('recovery_title')}>
+        <Sheet key="codes" onClose={() => {}} title={t('recovery_title')}>
           <RecoveryCodes codes={codes} onDone={() => setCodes(null)} />
         </Sheet>
       )}
 
       {showDelete && (
-        <Sheet onClose={() => setShowDelete(false)} title={t('s_delete')}>
+        <Sheet key="delete" onClose={() => setShowDelete(false)} title={t('s_delete')}>
           <h2 className="sheet__title">{t('s_delete')}</h2>
           <p>{t('s_delete_warn')}</p>
           <label className="field">
@@ -176,6 +189,7 @@ export default function Settings({ user, setLang, refreshUser, signOut, onShowGu
           </div>
         </Sheet>
       )}
-    </section>
+      </AnimatePresence>
+    </>
   )
 }

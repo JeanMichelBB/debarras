@@ -1,22 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { AnimatePresence, motion } from 'framer-motion'
+import { fadeUp, slideDown } from './motion.jsx'
 import { api } from './api.js'
 import { commitSwipe, removeSwipe, sameTitle, EVT_SWIPE, EVT_UNDO } from './actions.js'
-import { decisionForKey, filterParams, countActiveFilters } from './swipeLogic.js'
+import { decisionForKey, filterParams, countActiveFilters, EMPTY_FILTERS } from './swipeLogic.js'
 import { loadFilters, saveFilters } from './storage.js'
 import Deck from './Deck.jsx'
 import FiltersPanel from './FiltersPanel.jsx'
 import { IconButton, Mark } from './ui.jsx'
 import { useApp } from './ctx.jsx'
 
-const BATCH = 10 // one pile = 10 titles; the next pile only loads when asked
+const BATCH = 10 // titles fetched at a time
+const LOW = 12 // when the pile drops below this many cards, the next batch loads quietly and fades in at the bottom
 
 // Dev only: add ?loading to the address to hold the pile loader for testing.
 const HOLD_LOADING = import.meta.env.DEV && new URLSearchParams(window.location.search).has('loading')
 
 const idOf = (c) => `${c.media_type}:${c.tmdb_id}`
 
-export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
+export default function Sort({ active, sheetOpen, openDetails, actionsSlot, similar, closeSignal, onBeforeFilters }) {
   const { t, notify, errorText } = useApp()
   const [filters, setFilters] = useState(loadFilters)
   const [stack, setStack] = useState([])
@@ -25,8 +28,11 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
   const [exhausted, setExhausted] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const [canUndo, setCanUndo] = useState(false)
+  const [wantCount, setWantCount] = useState(0)
+  const [likeOf, setLikeOf] = useState(null) // title the current pile was built from
 
   const deck = useRef(null)
+  useEffect(() => setShowFilters(false), [closeSignal]) // another sheet opened from the bar
   const stackRef = useRef([])
   const history = useRef([])
   // Titles decided this session. A refill that was already in flight when the swipe happened
@@ -36,15 +42,17 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
   const exhaustedRef = useRef(false)
   const pageRef = useRef(1)
   const gen = useRef(0)
+  const shuffleNext = useRef(false) // Apply in the filters reshuffles the pile, even if nothing changed
+  const pendingSource = useRef(null) // 'wild' = next reload ignores what the user liked
   stackRef.current = stack
 
   const fetchMore = useCallback(
-    async (reset = false) => {
+    async (reset = false, opts = {}) => {
       if (loadingRef.current && !reset) return
       if (!reset && exhaustedRef.current) return
       const myGen = reset ? ++gen.current : gen.current
       if (reset) {
-        pageRef.current = 1
+        pageRef.current = opts.page || 1
         exhaustedRef.current = false
         setExhausted(false)
       }
@@ -53,7 +61,7 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
       setError(null)
       try {
         const exclude = (reset ? [] : stackRef.current).map(idOf).join(',')
-        const res = await api.queue({ ...filterParams(filters), limit: BATCH, page: pageRef.current, exclude })
+        const res = await api.queue({ ...filterParams(filters), limit: BATCH, page: pageRef.current, exclude, ...(opts.source && { source: opts.source }), ...(opts.shuffle && { shuffle: 1 }) })
         if (myGen !== gen.current) return
         pageRef.current = res.next_page
         if (res.cards.length === 0) {
@@ -81,7 +89,13 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
   useEffect(() => {
     history.current = []
     setCanUndo(false)
-    fetchMore(true)
+    const src = pendingSource.current
+    pendingSource.current = null
+    // "Surprise me" starts a few pages into the trending list so it differs from the usual pile.
+    const shuffle = shuffleNext.current
+    shuffleNext.current = false
+    if (src) fetchMore(true, { source: src, page: 2 + Math.floor(Math.random() * 6) })
+    else fetchMore(true, shuffle ? { shuffle: true, page: 1 + Math.floor(Math.random() * 3) } : {})
   }, [fetchMore])
 
   const removeFromStack = (item) => setStack((s) => s.filter((c) => !sameTitle(c, item)))
@@ -162,24 +176,108 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
   })
 
   const applyFilters = (f) => {
+    setLikeOf(null)
+    shuffleNext.current = true
     saveFilters(f)
-    setFilters(f)
+    setFilters({ ...f })
     setShowFilters(false)
   }
 
   const nActive = countActiveFilters(filters)
   const empty = stack.length === 0
 
+  // Keep the pile topped up: no "pile cleared" stop. New cards arrive at the bottom of the pile.
+  useEffect(() => {
+    if (loading || error || exhausted || HOLD_LOADING) return
+    if (likeOf && stack.length === 0) {
+      setLikeOf(null) // a themed pile ran out: go back to the usual pile
+      fetchMore(true)
+    } else if (!likeOf && stack.length < LOW) {
+      fetchMore()
+    }
+  }, [stack.length, loading, error, exhausted, likeOf, fetchMore])
+
+  // pickTonight, moreLikeLiked and surprise below are ready to be wired to a button; they have no home in the UI yet.
+  const pickTonight = async () => {
+    try {
+      const total = (await api.stats()).want || 0
+      if (!total) return notify(t('sort_tonight_none'))
+      const res = await api.swipes({ status: 'want', limit: 1, offset: Math.floor(Math.random() * total) })
+      if (res.items[0]) openDetails(res.items[0], res.items[0].status)
+    } catch (e) {
+      notify(errorText(e), 'error')
+    }
+  }
+
+  const moreLikeLiked = async () => {
+    setLoading(true)
+    try {
+      const res = await api.queue({ ...filterParams(filters), limit: BATCH, source: 'related' })
+      const fresh = res.cards.filter((c) => !decided.current.has(idOf(c)))
+      if (!fresh.length) notify(t('sort_related_none'))
+      else setStack(fresh)
+    } catch (e) {
+      notify(errorText(e, 'sort_error'), 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // "More like this" from a detail sheet: replace the pile with titles similar to that one.
+  useEffect(() => {
+    if (!similar) return
+    const { label, query } = similar
+    let live = true
+    setLoading(true)
+    setError(null)
+    api.queue({ limit: BATCH, ...query })
+      .then((res) => {
+        if (!live) return
+        const fresh = res.cards.filter((c) => !decided.current.has(idOf(c)))
+        if (!fresh.length) return notify(t('sort_similar_none', { title: label }))
+        history.current = []
+        setCanUndo(false)
+        exhaustedRef.current = false
+        setExhausted(false)
+        setLikeOf(similar)
+        setStack(fresh)
+      })
+      .catch((e) => live && notify(errorText(e, 'sort_error'), 'error'))
+      .finally(() => live && setLoading(false))
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [similar])
+
+  const backToMine = () => {
+    setLikeOf(null)
+    fetchMore(true)
+  }
+
+  const surprise = () => {
+    setLikeOf(null)
+    pendingSource.current = 'wild'
+    saveFilters(EMPTY_FILTERS)
+    setFilters({ ...EMPTY_FILTERS })
+  }
+
   return (
     <section className="screen sort" aria-label={t('nav_sort')}>
       {active && actionsSlot && createPortal(
         <>
-          <IconButton icon="filter" label={t('filters')} badge={nActive} onClick={() => setShowFilters(true)} />
+          <IconButton icon="filter" label={t('filters')} badge={nActive} on={showFilters} pill onClick={() => { if (showFilters) { setShowFilters(false); return } onBeforeFilters?.(); setShowFilters(true) }} />
           <IconButton icon="undo" label={t('undo')} hot={canUndo} disabled={!canUndo} onClick={undo} />
         </>,
         actionsSlot,
       )}
       <div className="stage">
+        <AnimatePresence>
+          {likeOf && !empty && (
+            <motion.p key="similar" className="similar-bar" {...slideDown}>
+              <span>{t(likeOf.kind === 'title' ? 'sort_similar_to' : 'sort_person_to', { title: likeOf.label })}</span>
+              <button type="button" className="linkbtn" onClick={backToMine}>{t('sort_similar_back')}</button>
+            </motion.p>
+          )}
+        </AnimatePresence>
         {(HOLD_LOADING || (empty && loading)) && (
           <div className="loading-mark" role="status">
             <Mark loading />
@@ -187,30 +285,31 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot }) {
           </div>
         )}
         {empty && !loading && error && (
-          <div className="empty">
+          <motion.div className="empty" {...fadeUp}>
             <p>{error}</p>
             <button type="button" className="btn btn--primary" onClick={() => fetchMore(true)}>{t('retry')}</button>
-          </div>
+          </motion.div>
         )}
         {empty && !loading && !error && exhausted && (
-          <div className="empty">
+          <motion.div className="empty" {...fadeUp}>
             <h2>{t('sort_empty_title')}</h2>
             <p>{t('sort_empty_body')}</p>
             <button type="button" className="btn btn--primary" onClick={() => setShowFilters(true)}>{t('sort_change_filters')}</button>
-          </div>
-        )}
-        {empty && !loading && !error && !exhausted && (
-          <div className="empty">
-            <h2>{t('sort_done_title')}</h2>
-            <p>{t('sort_done_body')}</p>
-            <button type="button" className="btn btn--primary" onClick={() => fetchMore()}>{t('sort_more')}</button>
-            <button type="button" className="btn btn--ghost" onClick={() => setShowFilters(true)}>{t('sort_explore')}</button>
-          </div>
+          </motion.div>
         )}
         {!empty && !HOLD_LOADING && <Deck ref={deck} cards={stack} onDecide={onDecide} onDetails={openDetails} />}
       </div>
 
-      {showFilters && <FiltersPanel value={filters} onApply={applyFilters} onClose={() => setShowFilters(false)} />}
+      <AnimatePresence>
+        {showFilters && (
+          <FiltersPanel
+            key="filters"
+            value={filters}
+            onApply={applyFilters}
+            onClose={() => setShowFilters(false)}
+          />
+        )}
+      </AnimatePresence>
     </section>
   )
 }

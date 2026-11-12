@@ -28,6 +28,7 @@ WEBAUTHN_ORIGINS = _list("WEBAUTHN_ORIGINS", "http://localhost:3002,http://local
 
 # TMDb "API Read Access Token" (v4 bearer), sent in the Authorization header.
 TMDB_READ_TOKEN = os.getenv("TMDB_READ_TOKEN", "")
+TMDB_WARM = os.getenv("TMDB_WARM", "1") == "1"  # keep trending and genres cached in the background
 TMDB_RPS = float(os.getenv("TMDB_RPS", "30"))  # stay under TMDb's ~40 req/s per-IP ceiling
 # TMDb's terms limit how long data may be cached; refresh well inside that.
 CACHE_TTL_DAYS = int(os.getenv("CACHE_TTL_DAYS", "7"))

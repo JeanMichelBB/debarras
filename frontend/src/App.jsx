@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, setOnUnauthorized, setToken } from './api.js'
 import { normalizeLang, translate } from './i18n.js'
-import { isOnboarded, isTutorialSeen, loadLang, markTutorialSeen, resetTutorial, saveLang } from './storage.js'
+import { isOnboarded, isTutorialSeen, loadLang, markTutorialSeen, pushHistory, resetTutorial, saveLang } from './storage.js'
+import { EVT_SWIPE, EVT_UNDO } from './actions.js'
 import { AppCtx } from './ctx.jsx'
 import AuthScreen from './AuthScreen.jsx'
 import Onboarding from './Onboarding.jsx'
@@ -11,12 +12,14 @@ import Sort from './Sort.jsx'
 import Lists from './Lists.jsx'
 import Settings from './Settings.jsx'
 import DetailSheet from './DetailSheet.jsx'
-import { IconButton, Toast } from './ui.jsx'
+import { HistorySheet, PersonSheet, Trail } from './Explore.jsx'
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import { base, snap, soft } from './motion.jsx'
+import { IconButton, Sheet, Toast } from './ui.jsx'
+import { AboutSheet } from './Credits.jsx'
 
 // Dev only: add ?skeleton to the address to hold the full-app skeleton for testing.
 const HOLD_SKELETON = import.meta.env.DEV && new URLSearchParams(window.location.search).has('skeleton')
-
-const TABS = ['sort', 'lists']
 
 export default function App() {
   const [lang, setLangState] = useState(() => normalizeLang(loadLang()))
@@ -24,16 +27,16 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [bootError, setBootError] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
-  const [tab, setTab] = useState('sort')
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [panel, setPanel] = useState(null) // 'lists' | 'settings': the sheet opened from the bottom bar
+  const [stack, setStack] = useState([]) // sheets opened on top of it: titles, people, history
+  const [closeSignal, setCloseSignal] = useState(0)
+  const [wantCount, setWantCount] = useState(0)
   const [showGuide, setShowGuide] = useState(() => !isTutorialSeen())
-  const [sheet, setSheet] = useState(null) // { item, status }
+  const [similar, setSimilar] = useState(null) // { kind, label, query, n } asks Sort to show a themed pile
   const [toast, setToast] = useState(null)
-  const [tabsSlot, setTabsSlot] = useState(null) // Lists puts its Seen / Want / Not now tabs into the header
-  const [actionsSlot, setActionsSlot] = useState(null) // where the Sort screen puts its top-bar buttons
+  const [actionsSlot, setActionsSlot] = useState(null) // where the Sort screen puts its filter and undo buttons in the bar
   const toastTimer = useRef(null)
-  const screensRef = useRef(null)
-  const [topBlur, setTopBlur] = useState(false) // header: solid at the top of a page, blurred once content scrolls under it
-  const [navBlur, setNavBlur] = useState(false) // bottom bar is solid at the top of a page and blurs once you scroll down with content still below
 
   const t = useCallback((key, vars) => translate(lang, key, vars), [lang])
 
@@ -62,9 +65,10 @@ export default function App() {
     setToken(null)
     setTokenState(null)
     setUser(null)
-    setSheet(null)
+    setStack([])
+    setPanel(null)
+    setSimilar(null)
     setOnboarding(false)
-    setTab('sort')
   }, [])
 
   // Any 401 from the API signs the user out.
@@ -93,24 +97,18 @@ export default function App() {
     if (token) boot()
   }, [token, boot])
 
+  // "Lists" count in the bar: titles waiting in Want to watch.
   useEffect(() => {
-    const box = screensRef.current
-    if (!box) return undefined
-    const check = () => {
-      const scrolled = box.scrollTop > 4
-      setTopBlur(scrolled)
-      setNavBlur(scrolled && box.scrollHeight - box.scrollTop - box.clientHeight > 4)
-    }
-    check()
-    box.addEventListener('scroll', check, { passive: true })
-    const ro = new ResizeObserver(check)
-    ro.observe(box)
-    Array.from(box.children).forEach((c) => ro.observe(c))
+    if (!user) return undefined
+    const load = () => api.stats().then((r) => setWantCount(r.want || 0)).catch(() => {})
+    load()
+    window.addEventListener(EVT_SWIPE, load)
+    window.addEventListener(EVT_UNDO, load)
     return () => {
-      box.removeEventListener('scroll', check)
-      ro.disconnect()
+      window.removeEventListener(EVT_SWIPE, load)
+      window.removeEventListener(EVT_UNDO, load)
     }
-  }, [tab, user, onboarding, token])
+  }, [user])
 
   useEffect(() => {
     document.documentElement.lang = lang
@@ -123,8 +121,39 @@ export default function App() {
     if (recovered) notify(translate(lang, 'recovery_after'))
   }
 
-  const openDetails = useCallback((item, status = null) => setSheet({ item, status }), [])
-  const closeSheet = useCallback(() => setSheet(null), [])
+  // Sheets: the bar opens one panel; anything opened from inside it stacks on top.
+  // Closing or saving pops one level, so you land back on the sheet you came from.
+  const closeAll = useCallback(() => {
+    setStack([])
+    setPanel(null)
+  }, [])
+  const popSheet = useCallback(() => setStack((s) => s.slice(0, -1)), [])
+  const push = useCallback((entry) => {
+    if (entry.type === 'detail' || entry.type === 'person') pushHistory(entry)
+    setStack((s) => {
+      const top = s[s.length - 1]
+      const same = top && top.type === entry.type && (entry.type === 'detail' ? top.item.tmdb_id === entry.item.tmdb_id && top.item.media_type === entry.item.media_type : top.id === entry.id)
+      return same ? s : [...s, entry]
+    })
+  }, [])
+  const openDetails = useCallback((item, status = null) => {
+    const slim = { media_type: item.media_type, tmdb_id: item.tmdb_id, title: item.title, year: item.year, poster: item.poster }
+    push({ type: 'detail', item: slim, status, name: item.title, icon: item.poster || null })
+  }, [push])
+  const openPerson = useCallback((p) => push({ type: 'person', id: p.id, name: p.name, icon: p.photo || null, photo: p.photo || null }), [push])
+  const openFromHistory = useCallback((e) => push(e), [push])
+  const showPile = useCallback((kind, label, query) => {
+    closeAll()
+    setSimilar({ kind, label, query, n: Date.now() })
+  }, [closeAll])
+  const showSimilar = useCallback((item) => showPile('title', item.title, { like: `${item.media_type}:${item.tmdb_id}` }), [showPile])
+  const showPersonPile = useCallback((p) => showPile('person', p.name, { person: p.id }), [showPile])
+  const showCompanyPile = useCallback((c) => showPile('company', c.name, { company: c.id }), [showPile])
+  const togglePanel = useCallback((name) => {
+    setCloseSignal((n) => n + 1)
+    setStack([])
+    setPanel((p) => (p === name && stack.length === 0 ? null : name))
+  }, [stack.length])
 
   const ctx = useMemo(() => ({ t, lang, notify, errorText }), [t, lang, notify, errorText])
 
@@ -141,42 +170,73 @@ export default function App() {
   else if (!user)
     body = <AppSkeleton />
   else if (onboarding) body = <Onboarding onDone={() => setOnboarding(false)} />
-  else
+  else {
+    const full = [
+      ...(panel ? [{ type: 'panel', name: panel === 'lists' ? t('nav_lists') : t('nav_settings'), icon: null }] : []),
+      ...stack,
+    ]
+    const jump = (i) => setStack(full.slice(panel ? 1 : 0, i + 1))
+    const trail = full.length > 1 ? <Trail entries={full} onJump={jump} onBack={popSheet} /> : null
     body = (
-      <div className={`shell${tab === 'settings' ? ' shell--settings' : ''}${tab === 'lists' ? ' shell--lists' : ''}`}>
-        <header className={`topbar${topBlur ? ' topbar--blur' : ''}`}>
+      <div className="shell">
+        <header className="topbar">
           <div className="topbar__row">
             <span className="wordmark">{t('app_name')}</span>
-            <div className="topbar__actions">
-              <span ref={setActionsSlot} className="topbar__slot" />
-              <IconButton icon="gear" label={t('nav_settings')} on={tab === 'settings'} onClick={() => { setSheet(null); setTab(tab === 'settings' ? 'sort' : 'settings') }} />
-            </div>
+            <button type="button" className="linkbtn" onClick={() => setAboutOpen(true)}>{t('auth_about')}</button>
           </div>
-          {tab === 'lists' && <div ref={setTabsSlot} className="topbar__tabs" />}
         </header>
-        <div className="screens" ref={screensRef}>
-          <div hidden={tab === 'lists'}>
-            <Sort active={tab === 'sort'} sheetOpen={!!sheet} openDetails={openDetails} actionsSlot={actionsSlot} />
-          </div>
-          {tab === 'lists' && <Lists openDetails={openDetails} tabsSlot={tabsSlot} />}
-          {tab === 'settings' && <Settings user={user} setLang={setLang} refreshUser={refreshUser} signOut={signOut} onShowGuide={() => { resetTutorial(); setShowGuide(true); setTab('sort') }} />}
+        <div className="screens">
+          <Sort active sheetOpen={!!panel || stack.length > 0} openDetails={openDetails} actionsSlot={actionsSlot} similar={similar} closeSignal={closeSignal} onBeforeFilters={closeAll} />
         </div>
-        <nav className={`nav${navBlur ? ' nav--blur' : ''}`} aria-label="Main">
-          {TABS.map((id) => (
-            <button key={id} type="button" className={tab === id ? 'on' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => { setSheet(null); setTab(id) }}>
-              {t(`nav_${id}`)}
-            </button>
-          ))}
-        </nav>
-        {showGuide && tab === 'sort' && <Tutorial onDone={() => { markTutorialSeen(); setShowGuide(false) }} />}
-        {sheet && <DetailSheet item={sheet.item} status={sheet.status} onClose={closeSheet} />}
+        <motion.nav className="dock" aria-label="Main" initial={{ y: 90, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={soft}>
+          <motion.button type="button" className={`dock__lists${panel === 'lists' ? ' on' : ''}`} aria-pressed={panel === 'lists'} onClick={() => togglePanel('lists')} whileTap={{ scale: 0.94 }} transition={snap}>
+            {panel === 'lists' && <motion.span layoutId="dock-pill" className="dock__pill" style={{ borderRadius: 999 }} transition={base} />}
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+            <span>{t('nav_lists')}</span>
+            {wantCount > 0 && <small>{wantCount}</small>}
+          </motion.button>
+          <div className="dock__right">
+            <span ref={setActionsSlot} className="topbar__slot" />
+            <IconButton icon="gear" label={t('nav_settings')} on={panel === 'settings'} pill onClick={() => togglePanel('settings')} />
+          </div>
+        </motion.nav>
+        {showGuide && !panel && stack.length === 0 && <Tutorial onDone={() => { markTutorialSeen(); setShowGuide(false) }} />}
+        <AnimatePresence>
+          {aboutOpen && <AboutSheet key="about" onClose={() => setAboutOpen(false)} />}
+          {panel === 'lists' && (
+            <Sheet key="lists" onClose={closeAll} title={t('nav_lists')} wide tall covered={stack.length > 0}>
+              <h2 className="sheet__title">{t('nav_lists')}</h2>
+              <Lists openDetails={openDetails} />
+            </Sheet>
+          )}
+          {panel === 'settings' && (
+            <Settings key="settings" user={user} setLang={setLang} refreshUser={refreshUser} signOut={signOut} onClose={closeAll} covered={stack.length > 0}
+              onHistory={() => push({ type: 'history', name: t('h_title'), icon: null })}
+              onShowGuide={() => { resetTutorial(); setShowGuide(true); closeAll() }} />
+          )}
+          {stack.map((e, i) => {
+            const top = i === stack.length - 1
+            const head = top ? trail : null
+            const covered = !top
+            if (e.type === 'detail') {
+              return <DetailSheet key={`${i}:${e.item.media_type}:${e.item.tmdb_id}`} item={e.item} status={e.status} onClose={popSheet} onSimilar={showSimilar} onPerson={openPerson} onCompany={showCompanyPile} onOpen={openDetails} head={head} covered={covered} />
+            }
+            if (e.type === 'person') {
+              return <PersonSheet key={`${i}:p${e.id}`} person={e} onClose={popSheet} onOpen={openDetails} onMore={showPersonPile} head={head} covered={covered} />
+            }
+            return <HistorySheet key={`${i}:h`} onClose={popSheet} onOpen={openFromHistory} head={head} covered={covered} />
+          })}
+        </AnimatePresence>
       </div>
     )
+  }
 
   return (
     <AppCtx.Provider value={ctx}>
-      {body}
-      <Toast toast={toast} />
+      <MotionConfig reducedMotion="user">
+        {body}
+        <Toast toast={toast} />
+      </MotionConfig>
     </AppCtx.Provider>
   )
 }

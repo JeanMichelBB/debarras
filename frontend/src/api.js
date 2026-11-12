@@ -84,6 +84,9 @@ export const api = {
   details: (mt, id) => request(`/titles/${mt}/${id}`),
   facts: (mt, id) => request(`/titles/${mt}/${id}/facts`),
   genres: () => request('/meta/genres'),
+  loginPosters: () => request('/public/login-posters', { auth: false }),
+  person: (id) => request(`/people/${id}`),
+  company: (id) => request(`/companies/${id}`),
   // swipes
   swipe: (body) => request('/swipe', { method: 'POST', body }),
   undo: (mt, id) => request(`/swipe/${mt}/${id}`, { method: 'DELETE' }),

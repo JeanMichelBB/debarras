@@ -77,6 +77,7 @@ def list_swipes(
     q: str | None = Query(None, max_length=100),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    sort: Literal["recent", "az", "year"] = "recent",
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -88,9 +89,13 @@ def list_swipes(
     if q:
         cond.append(UserTitle.title.contains(q, autoescape=True))
     total = db.scalar(select(func.count()).select_from(UserTitle).where(*cond))
+    order = {
+        "recent": (UserTitle.decided_at.desc(), UserTitle.id.desc()),
+        "az": (func.lower(UserTitle.title), UserTitle.id),
+        "year": (UserTitle.year.desc(), UserTitle.title, UserTitle.id),
+    }[sort]
     rows = db.scalars(
-        select(UserTitle).where(*cond).order_by(UserTitle.decided_at.desc(), UserTitle.id.desc())
-        .limit(limit).offset(offset)
+        select(UserTitle).where(*cond).order_by(*order).limit(limit).offset(offset)
     ).all()
     return {"items": [_item(r) for r in rows], "total": total}
 

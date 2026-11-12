@@ -6,6 +6,8 @@ excluded. v1 treats "not_now" like any decided title; resurfacing them is phase 
 """
 
 import asyncio
+import random
+from types import SimpleNamespace
 from datetime import date as _date
 from dataclasses import dataclass, field
 
@@ -73,7 +75,7 @@ def _pair(item: dict, media_type: str, reason: str) -> tuple[dict, dict]:
     return card(item, media_type, reason), item
 
 
-async def _from_seed(db: Session, seed: UserTitle, lang: str) -> dict[str, list]:
+async def _from_seed(db: Session, seed: UserTitle, lang: str, wide: bool = False) -> dict[str, list]:
     """Related candidates for one seed title, grouped by source strength."""
     out: dict[str, list] = {"franchise": [], "director": [], "cast": [], "similar": []}
     try:
@@ -107,12 +109,15 @@ async def _from_seed(db: Session, seed: UserTitle, lang: str) -> dict[str, list]
                 items = sorted(res.get("cast", []), key=lambda p: p.get("vote_count", 0), reverse=True)
                 out["cast"] += [_pair(p, "movie", label) for p in items[:PER_PERSON]]
 
-    rec = await _safe(tmdb.tmdb_get(f"/{seed.media_type}/{seed.tmdb_id}/recommendations", lang=lang))
-    if rec:
-        name = details.get("title") or details.get("name")
-        out["similar"] += [
-            _pair(p, seed.media_type, f"Because you liked {name}") for p in rec.get("results", [])[:PER_PERSON]
-        ]
+    n = 20 if wide else PER_PERSON
+    name = details.get("title") or details.get("name")
+    why = f"Because you liked {name}"
+    # Recommendations arrive with the cached details (no extra call); only "similar" needs its own.
+    out["similar"] += [_pair(p, seed.media_type, why) for p in (details.get("recommendations") or [])[:n]]
+    if wide:
+        sim = await _safe(tmdb.tmdb_get(f"/{seed.media_type}/{seed.tmdb_id}/similar", lang=lang))
+        if sim:
+            out["similar"] += [_pair(p, seed.media_type, why) for p in sim.get("results", [])[:n]]
     return out
 
 
@@ -147,37 +152,78 @@ async def _filler_page(lang: str, filters: Filters, page: int) -> list[tuple[dic
     return out
 
 
-async def build_queue(
-    db: Session, user: User, limit: int, filters: Filters, page: int = 1, exclude: set[tuple[str, int]] | None = None
-) -> dict:
-    lang = user.lang
+def _load_state(db: Session, user_id: int, seed_count: int) -> tuple[set[tuple[str, int]], list]:
+    """Two quick queries, run in a worker thread so the event loop keeps serving other users."""
     decided = {
         (r.media_type, r.tmdb_id)
-        for r in db.execute(select(UserTitle.media_type, UserTitle.tmdb_id).where(UserTitle.user_id == user.id))
+        for r in db.execute(select(UserTitle.media_type, UserTitle.tmdb_id).where(UserTitle.user_id == user_id))
     }
-    skip = decided | (exclude or set())
-
     seeds = db.scalars(
         select(UserTitle)
-        .where(UserTitle.user_id == user.id, UserTitle.status.in_(("watched", "want")))
+        .where(UserTitle.user_id == user_id, UserTitle.status.in_(("watched", "want")))
         .where((UserTitle.rating.is_(None)) | (UserTitle.rating > 1))
         .order_by(UserTitle.decided_at.desc())
-        .limit(SEED_COUNT)
-    ).all()
+        .limit(seed_count)
+    ).all() if seed_count else []
+    return decided, seeds
+
+
+async def build_queue(
+    db: Session, user: User, limit: int, filters: Filters, page: int = 1, exclude: set[tuple[str, int]] | None = None,
+    source: str = "mix", like: tuple[str, int] | None = None, shuffle: bool = False, person: int | None = None, company: int | None = None,
+) -> dict:
+    """source: "mix" = related first then filler, "related" = only titles related to liked ones,
+    "wild" = filler only (ignores what the user liked)."""
+    lang = user.lang
+    if person or company:  # "more from this person / studio": only their titles, ignoring saved filters
+        filters, source = Filters(), "related"
+    if like:  # "more like this title": related to that one title only, ignoring saved filters
+        filters, source = Filters(), "related"
+    decided, found = await asyncio.to_thread(_load_state, db, user.id, 0 if like or source == "wild" else SEED_COUNT)
+    skip = decided | (exclude or set())
+
+    seeds = [SimpleNamespace(media_type=like[0], tmdb_id=like[1])] if like else found
+    if like:
+        skip = skip | {like}
+
+    extra: list[tuple[dict, dict]] = []
+    if person:
+        credits = await _safe(tmdb.tmdb_get(f"/person/{person}/combined_credits", lang=lang)) or {}
+        who = await _safe(tmdb.tmdb_get(f"/person/{person}", lang=lang)) or {}
+        reason = f"Work by {who.get('name', '')}".strip()
+        rows = [c for c in credits.get("cast", []) if c.get("order") is None or c["order"] < 10]
+        rows += [c for c in credits.get("crew", []) if c.get("job") in ("Director", "Creator")]
+        rows.sort(key=lambda p: p.get("vote_count", 0), reverse=True)
+        extra = [_pair(p, p.get("media_type"), reason) for p in rows if p.get("media_type") in ("movie", "tv")]
+    if company:
+        who = await _safe(tmdb.tmdb_get(f"/company/{company}", lang=lang)) or {}
+        reason = f"From {who.get('name', '')}".strip()
+        lists = await asyncio.gather(*(
+            _safe(tmdb.tmdb_get(f"/discover/{t}", {"with_companies": company, "sort_by": "popularity.desc",
+                                                    "vote_count.gte": MIN_VOTES, "page": page}, lang=lang))
+            for t in ("movie", "tv")))
+        per = [[_pair(p, t, reason) for p in (r or {}).get("results", [])] for t, r in zip(("movie", "tv"), lists)]
+        for i in range(max((len(x) for x in per), default=0)):  # interleave movies and TV
+            extra += [x[i] for x in per if i < len(x)]
 
     grouped: dict[str, list] = {"franchise": [], "director": [], "cast": [], "similar": []}
-    for res in await asyncio.gather(*(_from_seed(db, s, lang) for s in seeds)):
+    for res in await asyncio.gather(*(_from_seed(db, s, lang, wide=bool(like)) for s in ([] if (person or company) else seeds))):
         for k, v in res.items():
             grouped[k] += v
     candidates = grouped["franchise"] + grouped["director"] + grouped["cast"] + grouped["similar"]
+    if person or company:
+        candidates = extra
+    if like:  # recommendations are the closest match for a single title, so they go before people
+        candidates = grouped["franchise"] + grouped["similar"] + grouped["director"] + grouped["cast"]
 
     queue: list[dict] = []
+    cap = limit * 3 if shuffle else limit  # shuffle: gather extra, then pick `limit` at random
     seen: set[tuple[str, int]] = set()
 
     def take(pairs: list[tuple[dict, dict]]) -> None:
         for c, raw in pairs:
             key = (c["media_type"], c["tmdb_id"])
-            if len(queue) >= limit:
+            if len(queue) >= cap:
                 return
             if key in skip or key in seen or c["media_type"] not in ("movie", "tv"):
                 continue
@@ -188,9 +234,14 @@ async def build_queue(
 
     take(candidates)
     next_page = page
-    for p in range(page, page + MAX_FILLER_PAGES):
-        if len(queue) >= limit:
+    for p in range(page, page + (MAX_FILLER_PAGES if source != "related" else 0)):
+        if len(queue) >= cap:
             break
         take(await _filler_page(lang, filters, p))
         next_page = p + 1
+    if shuffle and len(queue) > limit:
+        queue = random.sample(queue, limit)
+    if like:
+        for c in queue:
+            c["reason"] = (c.get("reason") or "").replace("Because you liked", "Similar to")
     return {"cards": queue, "next_page": next_page}

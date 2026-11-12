@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { motion } from 'framer-motion'
+import { base, listItem } from './motion.jsx'
 import { api } from './api.js'
 import { EVT_SWIPE, EVT_UNDO } from './actions.js'
 import { Poster, Spinner } from './ui.jsx'
 import { downloadBlob } from './RecoveryCodes.jsx'
+import { loadListsPrefs, saveListsSort, saveListsTab } from './storage.js'
 import { useApp } from './ctx.jsx'
 
-const TABS = ['watched', 'want', 'not_now']
+const TABS = ['want', 'watched', 'not_now']
+const SORTS = ['recent', 'az', 'year']
 const PAGE = 48
 
 function ImportPanel({ onDone }) {
@@ -77,9 +80,10 @@ function ImportPanel({ onDone }) {
 // Dev only: add ?loading to the address to hold the list skeleton for testing.
 const HOLD_LOADING = import.meta.env.DEV && new URLSearchParams(window.location.search).has('loading')
 
-export default function Lists({ openDetails, tabsSlot }) {
+export default function Lists({ openDetails }) {
   const { t, notify, errorText } = useApp()
-  const [tab, setTab] = useState('watched')
+  const [tab, setTab] = useState(() => (TABS.includes(loadListsPrefs().tab) ? loadListsPrefs().tab : 'want'))
+  const [sort, setSort] = useState(() => (SORTS.includes(loadListsPrefs().sort) ? loadListsPrefs().sort : 'recent'))
   const [q, setQ] = useState('')
   const [dq, setDq] = useState('')
   const [items, setItems] = useState([])
@@ -100,7 +104,7 @@ export default function Lists({ openDetails, tabsSlot }) {
       const my = ++gen.current
       setLoading(true)
       try {
-        const res = await api.swipes({ status: tab, q: dq, limit: PAGE, offset: reset ? 0 : countRef.current })
+        const res = await api.swipes({ status: tab, q: dq, limit: PAGE, offset: reset ? 0 : countRef.current, sort })
         if (my !== gen.current) return
         setItems((cur) => (reset ? res.items : [...cur, ...res.items]))
         setTotal(res.total)
@@ -110,7 +114,7 @@ export default function Lists({ openDetails, tabsSlot }) {
         if (my === gen.current) setLoading(false)
       }
     },
-    [tab, dq, notify, errorText],
+    [tab, dq, sort, notify, errorText],
   )
 
   const loadStats = useCallback(() => api.stats().then(setStats).catch(() => {}), [])
@@ -146,35 +150,36 @@ export default function Lists({ openDetails, tabsSlot }) {
   }
 
   return (
-    <section className="screen lists" aria-label={t('nav_lists')}>
-      {tabsSlot && createPortal(
-        <div className="tabs" role="tablist">
-          {TABS.map((s) => (
-            <button key={s} type="button" role="tab" aria-selected={tab === s} className={tab === s ? 'on' : ''} onClick={() => setTab(s)}>
-              {t(`l_${s}`)}
-              {stats && <span className="tabs__n">{stats[s]}</span>}
-            </button>
-          ))}
-        </div>,
-        tabsSlot,
-      )}
+    <section className="lists" aria-label={t('nav_lists')}>
+      <div className="tabs" role="tablist">
+        {TABS.map((s) => (
+          <button key={s} type="button" role="tab" aria-selected={tab === s} className={tab === s ? 'on' : ''} onClick={() => { saveListsTab(s); setTab(s) }}>
+            {t(`l_${s}`)}
+            {stats && <span className="tabs__n">{stats[s]}</span>}
+            {tab === s && <motion.span layoutId="lists-tab" className="tabs__bar" transition={base} />}
+          </button>
+        ))}
+      </div>
 
       <div className="lists__tools">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('l_search')} aria-label={t('l_search')} />
+        <select value={sort} aria-label={t('l_sort')} onChange={(e) => { saveListsSort(e.target.value); setSort(e.target.value) }}>
+          {SORTS.map((s) => <option key={s} value={s}>{t(`l_sort_${s}`)}</option>)}
+        </select>
         <button type="button" className="btn btn--ghost" onClick={doExport} disabled={!total}>{t('l_export')}</button>
       </div>
 
       {items.length === 0 && !loading && !HOLD_LOADING && <p className="empty-note">{t('l_empty')}</p>}
 
       <ul className="grid">
-        {!HOLD_LOADING && items.map((it) => (
-          <li key={`${it.media_type}:${it.tmdb_id}`}>
+        {!HOLD_LOADING && items.map((it, i) => (
+          <motion.li key={`${it.media_type}:${it.tmdb_id}`} {...listItem(i % 24)}>
             <button type="button" className="tile" onClick={() => openDetails(it, it.status)} aria-label={it.title}>
               <Poster src={it.poster} title={it.title} />
               {it.status === 'watched' && it.rating === 3 && <span className="tile__loved" aria-hidden="true" />}
               <span className="tile__title">{it.title}</span>
             </button>
-          </li>
+          </motion.li>
         ))}
       </ul>
 

@@ -11,7 +11,7 @@ DATABASE_URL = os.getenv("DATABASE_URL") or (
     f"@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}?charset=utf8mb4"
 )
 
-_kwargs = {"pool_pre_ping": True}
+_kwargs = {"pool_pre_ping": True, "pool_size": 20, "max_overflow": 20, "pool_recycle": 1800}
 if DATABASE_URL.startswith("sqlite"):
     _kwargs = {"connect_args": {"check_same_thread": False}}
 

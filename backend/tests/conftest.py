@@ -9,6 +9,7 @@ _tmp = tempfile.mkdtemp(prefix="debarras-test-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
 os.environ["JWT_SECRET"] = "test-secret-not-real"
 os.environ["TMDB_READ_TOKEN"] = "test-token-not-real"
+os.environ["TMDB_WARM"] = "0"
 os.environ["WEBAUTHN_RP_ID"] = "localhost"
 os.environ["WEBAUTHN_ORIGINS"] = "http://localhost:3002"
 
@@ -58,6 +59,7 @@ def details_raw(i: int) -> dict:
         ]},
         "keywords": {"keywords": [{"id": 1, "name": "k"}]},
         "reviews": {"results": [{"author": "a", "content": "great", "author_details": {"rating": 9}}]},
+        "recommendations": {"results": [item(8)]},
         "watch/providers": {"results": {
             "CA": {"link": "http://ca", "flatrate": [{"provider_name": "Netflix", "logo_path": "/n.jpg"}]},
             "FR": {"link": "http://fr", "rent": [{"provider_name": "Canal", "logo_path": "/c.jpg"}]},
@@ -74,7 +76,7 @@ class FakeTmdb:
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
 
-    async def __call__(self, path, params=None, *, lang="en", cache=True):
+    async def __call__(self, path, params=None, *, lang="en", cache=True, hi=False):
         params = params or {}
         self.calls.append((path, params))
         if path == "/collection/10":

@@ -75,6 +75,17 @@ class TitleCache(Base):
     refreshed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class LoginPoster(Base):
+    """A movie whose poster can appear on the login screen's cards (a few are picked at random)."""
+
+    __tablename__ = "login_posters"
+
+    tmdb_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    media_type: Mapped[str] = mapped_column(String(8), default="movie")
+    title: Mapped[str] = mapped_column(String(255))
+    poster_path: Mapped[str] = mapped_column(String(255))
+
+
 class FactCache(Base):
     """Wikipedia "behind the scenes" excerpts (or a negative result), per title and language."""
 

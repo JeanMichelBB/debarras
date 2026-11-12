@@ -87,7 +87,7 @@ export default function FiltersPanel({ value, onApply, onClose }) {
           <span>{t('f_rating')}</span>
           <select value={f.min_rating} onChange={(e) => set({ min_rating: e.target.value })}>
             <option value="">{t('f_any')}</option>
-            {[5, 6, 7, 8].map((r) => <option key={r} value={r}>{r}+</option>)}
+            {[5, 6, 7, 8].map((r) => <option key={r} value={r}>★ {r}+</option>)}
           </select>
         </label>
       </div>
