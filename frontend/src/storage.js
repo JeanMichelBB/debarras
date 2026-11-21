@@ -52,3 +52,14 @@ export const loadListsPrefs = () => ({
 })
 export const saveListsTab = (v) => localStorage.setItem('debarras_lists_tab', v)
 export const saveListsSort = (v) => localStorage.setItem('debarras_lists_sort', v)
+
+// Guest accounts: after a few swipes the app asks once whether to keep the progress.
+const GUEST_SWIPES_KEY = 'debarras_guest_swipes'
+const SAVE_ASKED_KEY = 'debarras_save_asked'
+export const bumpGuestSwipes = () => {
+  const n = Number(localStorage.getItem(GUEST_SWIPES_KEY) || 0) + 1
+  localStorage.setItem(GUEST_SWIPES_KEY, String(n))
+  return n
+}
+export const wasSaveAsked = () => localStorage.getItem(SAVE_ASKED_KEY) === '1'
+export const markSaveAsked = () => localStorage.setItem(SAVE_ASKED_KEY, '1')

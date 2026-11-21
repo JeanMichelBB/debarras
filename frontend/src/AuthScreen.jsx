@@ -56,6 +56,12 @@ export default function AuthScreen({ onAuthed }) {
       setMode('codes')
     })
 
+  const tryFirst = () =>
+    run(async () => {
+      const res = await api.guest()
+      onAuthed({ token: res.access_token, isNew: true })
+    })
+
   const signIn = () =>
     run(async () => {
       const { options, state } = await api.loginBegin()
@@ -96,6 +102,7 @@ export default function AuthScreen({ onAuthed }) {
         <Mark hero posters={posters} />
         <p className="auth__title">{t('tagline_title')}</p>
         {!supported && <p className="notice notice--error">{t('passkey_unsupported')}</p>}
+        <button type="button" className="btn btn--ghost auth__try" disabled={busy} onClick={tryFirst}>{t('auth_try')}</button>
         {error && <p className="notice notice--error" role="alert">{error}</p>}
       </div>
 

@@ -402,6 +402,8 @@ progress { width: 100%; height: 8px; accent-color: var(--ink-watched); }
 .auth__pile--hero .auth__sheet { width: 100%; height: 100%; border-radius: 14px; }
 .auth__pile--hero .auth__stamp { font-size: calc(var(--h) * 0.13); }
 .dock--auth { position: fixed; left: 0; right: 0; bottom: calc(46px + var(--safe-b)); margin: 0 auto; width: min(calc(100% - 24px), 436px); gap: 8px; }
+.auth__try { margin-top: 4px; }
+.guestbar { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line, rgba(255,255,255,.14)); border-radius: 12px; background: rgba(255,255,255,.04); color: var(--muted); font-size: .8125rem; }
 .auth__recover { position: fixed; right: max(18px, calc((100% - 436px) / 2 + 18px)); bottom: calc(8px + var(--safe-b)); }
 .dock__btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px; height: 42px; padding: 0 8px; border: 1px solid transparent; border-radius: 21px; background: none; color: var(--text); font-weight: 600; font-size: 0.875rem; white-space: nowrap; }
 .dock__btn:disabled { opacity: 0.45; }

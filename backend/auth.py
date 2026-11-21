@@ -50,8 +50,10 @@ router = APIRouter(tags=["auth"])
 bearer = HTTPBearer(auto_error=False)
 auth_limit = rate_limit("auth", 20, 60)
 recover_limit = rate_limit("recover", 8, 600)
+guest_limit = rate_limit("guest", 10, 3600)
 
 STATE_MINUTES = 5
+GUEST_TOKEN_DAYS = 365  # a guest has no passkey to sign in again, so the token must outlive a normal one
 RECOVERY_CODE_COUNT = 8
 
 
@@ -62,8 +64,8 @@ def _secret() -> str:
     return config.JWT_SECRET
 
 
-def create_token(user_id: int) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(days=config.JWT_EXPIRE_DAYS)
+def create_token(user_id: int, days: int | None = None) -> str:
+    exp = datetime.now(timezone.utc) + timedelta(days=days or config.JWT_EXPIRE_DAYS)
     return jwt.encode({"typ": "access", "sub": str(user_id), "exp": exp}, _secret(), algorithm="HS256")
 
 
@@ -204,6 +206,17 @@ def register_finish(body: FinishBody, db: Session = Depends(get_db)):
     return {"access_token": create_token(user.id), "token_type": "bearer", "recovery_codes": codes}
 
 
+# ── guest ─────────────────────────────────────────────────────────────────────
+@router.post("/auth/guest", status_code=201, dependencies=[Depends(guest_limit)])
+def guest(db: Session = Depends(get_db)):
+    """Try the app with no passkey. A guest is a normal user with zero passkeys: adding a passkey
+    later (POST /me/passkeys/*) keeps every swipe, because the user id does not change."""
+    user = User(handle=secrets.token_hex(16))
+    db.add(user)
+    db.commit()
+    return {"access_token": create_token(user.id, GUEST_TOKEN_DAYS), "token_type": "bearer"}
+
+
 # ── sign-in ───────────────────────────────────────────────────────────────────
 @router.post("/auth/login/begin", dependencies=[Depends(auth_limit)])
 def login_begin():
@@ -257,7 +270,7 @@ def _me(db: Session, user: User) -> dict:
         RecoveryCode.user_id == user.id, RecoveryCode.used_at.is_(None)))
     return {
         "id": user.id, "display_name": user.display_name, "lang": user.lang, "region": user.region,
-        "passkeys": n_pk, "recovery_codes_left": n_rc, "created_at": user.created_at.isoformat(),
+        "passkeys": n_pk, "guest": n_pk == 0, "recovery_codes_left": n_rc, "created_at": user.created_at.isoformat(),
     }
 
 

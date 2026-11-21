@@ -147,3 +147,47 @@ def test_delete_account_removes_everything(client, register):
 def test_requests_need_auth(client):
     for path in ("/me", "/titles/queue", "/swipes", "/swipes/stats", "/export/watched", "/meta/genres"):
         assert client.get(path).status_code == 401, path
+
+
+def _guest(client):
+    r = client.post("/auth/guest")
+    assert r.status_code == 201, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def test_guest_can_use_the_app_with_no_passkey(client):
+    headers = _guest(client)
+    me = client.get("/me", headers=headers).json()
+    assert me["guest"] is True and me["passkeys"] == 0
+    r = client.post("/swipe", headers=headers, json={"media_type": "movie", "tmdb_id": 1, "status": "watched"})
+    assert r.status_code in (200, 201)
+
+
+def test_registered_user_is_not_a_guest(client, user):
+    assert client.get("/me", headers=user).json()["guest"] is False
+
+
+def test_each_guest_is_a_separate_user(client):
+    a, b = _guest(client), _guest(client)
+    client.post("/swipe", headers=a, json={"media_type": "movie", "tmdb_id": 1, "status": "watched"})
+    assert client.get("/swipes/stats", headers=b).json()["watched"] == 0
+
+
+def test_guest_keeps_swipes_after_adding_a_passkey(client, monkeypatch):
+    headers = _guest(client)
+    client.post("/swipe", headers=headers, json={"media_type": "movie", "tmdb_id": 1, "status": "watched"})
+    before = client.get("/me", headers=headers).json()["id"]
+    begin = client.post("/me/passkeys/begin", headers=headers).json()
+    monkeypatch.setattr(auth, "verify_registration_response", lambda **kw: SimpleNamespace(
+        credential_id=b"guest-cred", credential_public_key=b"pk", sign_count=0))
+    r = client.post("/me/passkeys/finish", headers=headers, json={"credential": {"id": "g"}, "state": begin["state"]})
+    assert r.status_code == 201
+    me = r.json()
+    assert me["id"] == before and me["guest"] is False and me["passkeys"] == 1
+    assert client.get("/swipes/stats", headers=headers).json()["watched"] == 1
+    assert len(client.post("/me/recovery-codes", headers=headers).json()["recovery_codes"]) == 8
+
+
+def test_guest_sign_up_is_rate_limited(client):
+    codes = [client.post("/auth/guest").status_code for _ in range(11)]
+    assert codes[:10] == [201] * 10 and codes[10] == 429

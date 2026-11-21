@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, setOnUnauthorized, setToken } from './api.js'
 import { normalizeLang, translate } from './i18n.js'
-import { isOnboarded, isTutorialSeen, loadLang, markTutorialSeen, pushHistory, resetTutorial, saveLang } from './storage.js'
+import { bumpGuestSwipes, isOnboarded, isTutorialSeen, loadLang, markSaveAsked, markTutorialSeen, pushHistory, resetTutorial, saveLang, wasSaveAsked } from './storage.js'
 import { EVT_SWIPE, EVT_UNDO } from './actions.js'
 import { AppCtx } from './ctx.jsx'
 import AuthScreen from './AuthScreen.jsx'
@@ -17,6 +17,7 @@ import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import { base, snap, soft } from './motion.jsx'
 import { IconButton, Sheet, Toast } from './ui.jsx'
 import { AboutSheet } from './Credits.jsx'
+import SaveProgress from './SaveProgress.jsx'
 
 // Dev only: add ?skeleton to the address to hold the full-app skeleton for testing.
 const HOLD_SKELETON = import.meta.env.DEV && new URLSearchParams(window.location.search).has('skeleton')
@@ -28,6 +29,7 @@ export default function App() {
   const [bootError, setBootError] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [saveOpen, setSaveOpen] = useState(false) // a guest is offered to keep their progress
   const [panel, setPanel] = useState(null) // 'lists' | 'settings': the sheet opened from the bottom bar
   const [stack, setStack] = useState([]) // sheets opened on top of it: titles, people, history
   const [closeSignal, setCloseSignal] = useState(0)
@@ -109,6 +111,20 @@ export default function App() {
       window.removeEventListener(EVT_UNDO, load)
     }
   }, [user])
+
+  // A guest is asked once, after 15 swipes, whether to keep their progress.
+  const isGuest = !!user?.guest
+  useEffect(() => {
+    if (!isGuest || wasSaveAsked()) return undefined
+    const onSwipe = () => {
+      if (bumpGuestSwipes() >= 15) {
+        markSaveAsked()
+        setSaveOpen(true)
+      }
+    }
+    window.addEventListener(EVT_SWIPE, onSwipe)
+    return () => window.removeEventListener(EVT_SWIPE, onSwipe)
+  }, [isGuest])
 
   useEffect(() => {
     document.documentElement.lang = lang
@@ -203,10 +219,11 @@ export default function App() {
         {showGuide && !panel && stack.length === 0 && <Tutorial onDone={() => { markTutorialSeen(); setShowGuide(false) }} />}
         <AnimatePresence>
           {aboutOpen && <AboutSheet key="about" onClose={() => setAboutOpen(false)} />}
+          {saveOpen && <SaveProgress key="save" onClose={() => setSaveOpen(false)} onSaved={refreshUser} />}
           {panel === 'lists' && (
             <Sheet key="lists" onClose={closeAll} title={t('nav_lists')} wide tall covered={stack.length > 0}>
               <h2 className="sheet__title">{t('nav_lists')}</h2>
-              <Lists openDetails={openDetails} />
+              <Lists openDetails={openDetails} guest={isGuest} onSave={() => setSaveOpen(true)} />
             </Sheet>
           )}
           {panel === 'settings' && (

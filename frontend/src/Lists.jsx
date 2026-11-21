@@ -80,7 +80,7 @@ function ImportPanel({ onDone }) {
 // Dev only: add ?loading to the address to hold the list skeleton for testing.
 const HOLD_LOADING = import.meta.env.DEV && new URLSearchParams(window.location.search).has('loading')
 
-export default function Lists({ openDetails }) {
+export default function Lists({ openDetails, guest = false, onSave }) {
   const { t, notify, errorText } = useApp()
   const [tab, setTab] = useState(() => (TABS.includes(loadListsPrefs().tab) ? loadListsPrefs().tab : 'want'))
   const [sort, setSort] = useState(() => (SORTS.includes(loadListsPrefs().sort) ? loadListsPrefs().sort : 'recent'))
@@ -151,6 +151,12 @@ export default function Lists({ openDetails }) {
 
   return (
     <section className="lists" aria-label={t('nav_lists')}>
+      {guest && (
+        <p className="guestbar">
+          <span>{t('save_banner')}</span>
+          <button type="button" className="linkbtn" onClick={onSave}>{t('save_banner_cta')}</button>
+        </p>
+      )}
       <div className="tabs" role="tablist">
         {TABS.map((s) => (
           <button key={s} type="button" role="tab" aria-selected={tab === s} className={tab === s ? 'on' : ''} onClick={() => { saveListsTab(s); setTab(s) }}>

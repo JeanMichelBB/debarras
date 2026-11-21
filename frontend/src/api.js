@@ -69,6 +69,7 @@ export const api = {
   registerFinish: (credential, state) => request('/auth/register/finish', { method: 'POST', body: { credential, state }, auth: false }),
   loginBegin: () => request('/auth/login/begin', { method: 'POST', auth: false }),
   loginFinish: (credential, state) => request('/auth/login/finish', { method: 'POST', body: { credential, state }, auth: false }),
+  guest: () => request('/auth/guest', { method: 'POST', auth: false }),
   recover: (code) => request('/auth/recover', { method: 'POST', body: { code }, auth: false }),
   // account
   me: () => request('/me'),
