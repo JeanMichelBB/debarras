@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { animate, motion, useMotionValue, useTransform } from 'framer-motion'
 import { decide, withMomentum, FLY, PREVIEW, THRESHOLD } from './swipeLogic.js'
 import { Poster, Stamp } from './ui.jsx'
@@ -25,11 +25,28 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
   const y = useMotionValue(0)
   const rotate = useTransform(x, [-260, 0, 260], [-9, 0, 9])
   const [intent, setIntent] = useState(null)
+  const [stamp, setStamp] = useState(null) // label above the pile; it fades out slowly once the card has left
+  const [lit, setLit] = useState(false)
+  const fadeTimer = useRef(null)
+  const deckEl = useRef(null)
+  const [gap, setGap] = useState(60) // middle of the empty space between the top bar and the pile
   const [flying, setFlying] = useState(false) // the top card is leaving: it must not accept a new touch
   const busy = useRef(false)
   const moved = useRef(false) // true once a press turned into a drag, so its release is not a tap
   const top = cards[0]
   const topKey = top ? `${top.media_type}:${top.tmdb_id}` : ''
+
+  useEffect(() => () => clearTimeout(fadeTimer.current), [])
+  useEffect(() => {
+    clearTimeout(fadeTimer.current)
+    if (intent) {
+      setStamp(intent)
+      setLit(true)
+    } else {
+      setLit(false)
+      fadeTimer.current = setTimeout(() => setStamp(null), 1400)
+    }
+  }, [intent])
 
   // A new top card starts centered and ready.
   useEffect(() => {
@@ -67,9 +84,13 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
   }))
 
   const behind = cards.slice(1, 1 + BEHIND)
+  useLayoutEffect(() => {
+    if (stamp && deckEl.current) setGap(Math.max(24, deckEl.current.offsetTop / 2))
+  }, [stamp])
 
   return (
-    <div className="deck">
+    <>
+    <div className="deck" ref={deckEl}>
       {behind
         .map((c, i) => (
           <div
@@ -138,11 +159,14 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
             </p>
             {top.reason && <p className="card__reason">{top.reason}</p>}
           </div>
-          {intent && <Stamp status={intent} className={`card__stamp card__stamp--${intent}`} />}
         </motion.div>
         </motion.div>
       )}
     </div>
+
+    {/* Outside the pile, in the empty space above it, so it stays put while the card flies away. */}
+    {stamp && <Stamp key={stamp} status={stamp} className={`card__stamp card__stamp--${stamp} card__stamp--static`} style={{ top: gap, opacity: lit ? 1 : 0, transition: lit ? 'opacity 0.1s' : 'opacity 1.2s ease-out' }} />}
+    </>
   )
 })
 

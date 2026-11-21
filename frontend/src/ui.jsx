@@ -4,9 +4,9 @@ import { base, leave, pop, snap } from './motion.jsx'
 import { useApp } from './ctx.jsx'
 
 /** Rubber-stamp label. The one memorable element of the app. */
-export function Stamp({ status, className = '' }) {
+export function Stamp({ status, className = '', style }) {
   const { t } = useApp()
-  return <span className={`stamp stamp--${status} ${className}`}>{t(`st_${status}`)}</span>
+  return <span className={`stamp stamp--${status} ${className}`} style={style}>{t(`st_${status}`)}</span>
 }
 
 export function Poster({ src, title, eager = false }) {

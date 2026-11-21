@@ -192,9 +192,13 @@ select {
 .card__facts, .detail__facts { display: flex; flex-wrap: wrap; gap: 4px 14px; color: #c3cedb; font-size: 0.875rem; }
 .card__reason { color: var(--muted); font-size: 0.8125rem; }
 .card__stamp { position: absolute; z-index: 2; transition: opacity 0.12s; }
-.card__stamp--watched { top: 11%; left: 7%; transform: rotate(-14deg); }
-.card__stamp--not_now { top: 11%; right: 7%; transform: rotate(12deg); }
-.card__stamp--want { top: 9%; left: 50%; transform: translateX(-50%) rotate(-5deg); }
+.card__stamp--static { z-index: 30; pointer-events: none; }
+.card__stamp--static.card__stamp--watched { right: 26px; left: auto; transform: translateY(-50%) rotate(8deg); }
+.card__stamp--static.card__stamp--not_now { left: 26px; right: auto; transform: translateY(-50%) rotate(-8deg); }
+.card__stamp--static.card__stamp--want { left: 50%; transform: translate(-50%, -50%) rotate(-5deg); }
+.card__stamp--watched { top: 0; right: 2%; transform: translateY(-75%) rotate(8deg); }
+.card__stamp--not_now { top: 0; left: 2%; transform: translateY(-75%) rotate(-8deg); }
+.card__stamp--want { top: 0; left: 50%; transform: translate(-50%, -75%) rotate(-5deg); }
 
 .controls { padding: 0 18px 12px; display: grid; gap: 8px; }
 .stamps { display: flex; gap: 8px; }
