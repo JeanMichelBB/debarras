@@ -1,7 +1,7 @@
 """Builds the swipe queue: finish franchises / follow directors first, then fillers.
 
 Order: same franchise, same director, lead actors, TMDb recommendations, then filler
-(trending, or /discover when filters are set). Titles the user already decided are
+(well-known titles for a new user, then trending, or /discover when filters are set). Titles the user already decided are
 excluded. v1 treats "not_now" like any decided title; resurfacing them is phase 2.
 """
 
@@ -23,6 +23,7 @@ SEED_COUNT = 3        # most recent liked titles used to seed related picks
 CAST_PER_SEED = 2     # lead actors followed per seed
 PER_PERSON = 6        # titles taken per director / actor / recommendation list
 MIN_VOTES = 50        # skip near-unrated entries (cutscene compilations, stubs, bad data)
+FRESH_UNTIL = 30      # a user with fewer decided titles still gets the well-known picks first
 MAX_FILLER_PAGES = 4  # filler pages fetched per call when many titles are already decided
 
 
@@ -121,10 +122,43 @@ async def _from_seed(db: Session, seed: UserTitle, lang: str, wide: bool = False
     return out
 
 
-async def _filler_page(lang: str, filters: Filters, page: int) -> list[tuple[dict, dict]]:
+# A film needs this many TMDb votes to count as "everyone has heard of it".
+_WELL_KNOWN_VOTES = {"movie": 3000, "tv": 1000}
+DECADES = range(1970, 2030, 10)
+
+
+def _mainstream_requests(lang: str, t: str, page: int) -> list[tuple[str, object]]:
+    """Well-known titles for a new user, as (media type, request) pairs.
+
+    Movies: one query per decade, by box office and by vote count. Without the decade, the all-time
+    lists are mostly recent films and the 1970s to 1990s hits never show up.
+    Series: by vote count and by popularity."""
+    base = {"page": page, "include_adult": "false"}
+    out = []
+    if t == "movie":
+        for d in DECADES:
+            span = {"primary_release_date.gte": f"{d}-01-01", "primary_release_date.lte": f"{d + 9}-12-31"}
+            for sort, floor in (("revenue.desc", 2000), ("vote_count.desc", 1000)):
+                params = {**base, **span, "sort_by": sort, "vote_count.gte": floor}
+                out.append((t, _safe(tmdb.tmdb_get("/discover/movie", params, lang=lang))))
+    else:
+        for sort in ("vote_count.desc", "popularity.desc"):
+            params = {**base, "sort_by": sort, "vote_count.gte": _WELL_KNOWN_VOTES["tv"]}
+            out.append((t, _safe(tmdb.tmdb_get("/discover/tv", params, lang=lang))))
+    return out
+
+
+async def _filler_page(lang: str, filters: Filters, page: int, mainstream: bool = False) -> list[tuple[dict, dict]]:
     types = [filters.media_type] if filters.media_type in ("movie", "tv") else ["movie", "tv"]
     reqs = []
+    names: list[str] = []
     for t in types:
+        if mainstream and not filters.use_discover:
+            for name, req in _mainstream_requests(lang, t, page):
+                names.append(name)
+                reqs.append(req)
+            continue
+        names.append(t)
         if filters.use_discover:
             date_key = "primary_release_date" if t == "movie" else "first_air_date"
             params = {"page": page, "include_adult": "false", "sort_by": "popularity.desc", "vote_count.gte": 100}
@@ -140,10 +174,19 @@ async def _filler_page(lang: str, filters: Filters, page: int) -> list[tuple[dic
         else:
             reqs.append(_safe(tmdb.tmdb_get(f"/trending/{t}/week", {"page": page}, lang=lang)))
     results = await asyncio.gather(*reqs)
-    reason = "Popular for your filters" if filters.use_discover else "Trending"
+    reason = "Popular for your filters" if filters.use_discover else ("Popular" if mainstream else "Trending")
     lists = [
-        [_pair(p, t, reason) for p in (r or {}).get("results", [])] for t, r in zip(types, results)
+        [_pair(p, t, reason) for p in (r or {}).get("results", [])] for t, r in zip(names, results)
     ]
+    if mainstream and not filters.use_discover:
+        # Movies have one list per decade, series have two. Mix each kind at random, then alternate
+        # one movie, one series, so decades are mixed and the two kinds stay balanced.
+        by_kind: dict[str, list] = {t: [] for t in types}
+        for n, lst in zip(names, lists):
+            by_kind[n] += lst
+        for kind_list in by_kind.values():
+            random.shuffle(kind_list)
+        lists = list(by_kind.values())
     out = []
     for i in range(max((len(x) for x in lists), default=0)):  # interleave movies and TV
         for lst in lists:
@@ -187,6 +230,7 @@ async def build_queue(
         filters, source = Filters(), "related"
     decided, found = await asyncio.to_thread(_load_state, db, user.id, 0 if like or source == "wild" else SEED_COUNT)
     skip = decided | (exclude or set())
+    fresh = len(decided) < FRESH_UNTIL  # new user: start with titles everyone knows
     genre_names = await _genre_names(lang)
 
     seeds = [SimpleNamespace(media_type=like[0], tmdb_id=like[1])] if like else found
@@ -245,8 +289,10 @@ async def build_queue(
     for p in range(page, page + (MAX_FILLER_PAGES if source != "related" else 0)):
         if len(queue) >= cap:
             break
-        take(await _filler_page(lang, filters, p))
-        next_page = p + 1
+        take(await _filler_page(lang, filters, p, mainstream=fresh))
+        # A new user's page holds far more well-known titles than one batch uses. Stay on it until it
+        # is used up, so the best titles of each decade are not skipped.
+        next_page = p if (fresh and not filters.use_discover and len(queue) >= cap) else p + 1
     if shuffle and len(queue) > limit:
         queue = random.sample(queue, limit)
     if like:

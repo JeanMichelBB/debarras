@@ -16,11 +16,37 @@ def queue(client, headers, **params):
     return r.json()
 
 
-def test_cold_start_queue_is_trending_interleaved(client, user):
+def test_new_user_starts_with_well_known_titles(client, user, fake_tmdb):
+    cards = queue(client, user)["cards"]
+    assert {c["reason"] for c in cards} == {"Popular"}
+    kinds = [c["media_type"] for c in cards]
+    assert sorted(kinds) == ["movie", "movie", "tv", "tv"] and kinds[:2] == ["movie", "tv"]  # both kinds, movie first
+    assert cards[0]["poster"].startswith("https://image.tmdb.org/t/p/w500/")
+    assert not any(path.startswith("/trending/") for path, _ in fake_tmdb.calls)
+
+
+def test_new_user_movies_are_asked_decade_by_decade_by_box_office_and_votes(client, user, fake_tmdb):
+    queue(client, user)
+    movie = [p for path, p in fake_tmdb.calls if path == "/discover/movie"]
+    decades = {p["primary_release_date.gte"][:4] for p in movie}
+    assert decades == {"1970", "1980", "1990", "2000", "2010", "2020"}
+    assert {p["sort_by"] for p in movie} == {"revenue.desc", "vote_count.desc"}
+    assert all(p["primary_release_date.lte"][:4] == str(int(p["primary_release_date.gte"][:4]) + 9) for p in movie)
+    tv = [p for path, p in fake_tmdb.calls if path == "/discover/tv"]
+    assert {p["sort_by"] for p in tv} == {"vote_count.desc", "popularity.desc"}
+
+
+def test_new_user_stays_on_the_same_page_while_it_has_unused_titles(client, user):
+    first = queue(client, user, limit=2)
+    assert first["next_page"] == 1
+
+
+def test_user_with_many_decisions_gets_trending_interleaved(client, user):
+    for i in range(1000, 1030):
+        swipe(client, user, i, "not_now")
     cards = queue(client, user)["cards"]
     assert [c["tmdb_id"] for c in cards] == [800, 900, 801, 901]
     assert {c["reason"] for c in cards} == {"Trending"}
-    assert cards[0]["poster"].startswith("https://image.tmdb.org/t/p/w500/")
 
 
 def test_queue_finishes_franchise_then_director_then_cast_then_similar(client, user):
@@ -49,8 +75,9 @@ def test_not_now_is_not_shown_again(client, user):
 
 
 def test_queue_exclude_param_dedupes_client_stack(client, user):
-    ids = [c["tmdb_id"] for c in queue(client, user, exclude="movie:800,tv:900")["cards"]]
-    assert 800 not in ids and 900 not in ids and 801 in ids
+    cards = queue(client, user, exclude="movie:700,tv:700")["cards"]
+    keys = {(c["media_type"], c["tmdb_id"]) for c in cards}
+    assert ("movie", 700) not in keys and ("tv", 700) not in keys and ("movie", 701) in keys
 
 
 def test_queue_media_type_filter(client, user):
@@ -259,7 +286,7 @@ def test_login_posters_are_public_random_and_distinct(client):
 
 def test_queue_cards_carry_genre_names(client, user):
     cards = queue(client, user)["cards"]
-    assert cards and all(c["genres"] == ["Drama"] for c in cards)
+    assert cards and all(c["genres"] == ["Comedy"] for c in cards)  # discover items carry genre id 35
 
 
 def test_english_reader_never_gets_french_wikipedia_text(monkeypatch):

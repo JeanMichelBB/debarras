@@ -98,7 +98,7 @@ class FakeTmdb:
         if m := re.fullmatch(r"/discover/(movie|tv)", path):
             return {"results": [item(700, genre_ids=[35]), item(701, genre_ids=[35])]}
         if path in ("/genre/movie/list", "/genre/tv/list"):
-            return {"genres": [{"id": 18, "name": "Drama"}]}
+            return {"genres": [{"id": 18, "name": "Drama"}, {"id": 35, "name": "Comedy"}]}
         if m := re.fullmatch(r"/find/(tt\d+)", path):
             n = int(m.group(1)[2:])
             if n == 404:
