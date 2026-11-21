@@ -63,3 +63,8 @@ export const bumpGuestSwipes = () => {
 }
 export const wasSaveAsked = () => localStorage.getItem(SAVE_ASKED_KEY) === '1'
 export const markSaveAsked = () => localStorage.setItem(SAVE_ASKED_KEY, '1')
+
+// Taste card: shown once at 25 swipes and once more at 100 (kept per device).
+const TASTE_SEEN_KEY = 'debarras_taste_seen'
+export const tasteSeen = () => Number(localStorage.getItem(TASTE_SEEN_KEY) || 0)
+export const markTasteSeen = (n) => localStorage.setItem(TASTE_SEEN_KEY, String(n))

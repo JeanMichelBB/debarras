@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -38,6 +40,8 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(40), nullable=True)
     lang: Mapped[str] = mapped_column(String(2), default="en")
     region: Mapped[str] = mapped_column(String(2), default="CA")
+    # Secret part of the private calendar link (release days of Want titles). Null = no link.
+    cal_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -116,6 +120,11 @@ class UserTitle(Base):
     status: Mapped[str] = mapped_column(String(10))
     # 1 = disliked, 2 = fine, 3 = loved. Only meaningful for status "watched".
     rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # A flag on a Seen title, not a status. Cleared when the title leaves Seen.
+    rewatch: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # TMDb genre ids and the release date, saved at swipe time (taste card, calendar feed).
+    genre_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    release_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     decided_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

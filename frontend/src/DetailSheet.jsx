@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api.js'
-import { commitSwipe, removeSwipe } from './actions.js'
+import { commitSwipe, removeSwipe, setRewatch } from './actions.js'
+import { fmtDate, isUpcoming } from './format.js'
 import { Poster, Sheet, Spinner } from './ui.jsx'
 import { motion } from 'framer-motion'
 import { Expandable, fadeUp } from './motion.jsx'
@@ -178,12 +179,13 @@ function Review({ r }) {
 }
 
 export default function DetailSheet({ item, status, onClose, onSimilar, onPerson, onCompany, onOpen, head, covered }) {
-  const { t, notify, errorText } = useApp()
+  const { t, lang, notify, errorText } = useApp()
   const [d, setD] = useState(null)
   const [facts, setFacts] = useState(undefined)
   const [failed, setFailed] = useState(false)
   const [trailer, setTrailer] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [rewatch, setRewatchOn] = useState(false)
 
   const [tries, setTries] = useState(0) // bumped by "Try again"
 
@@ -196,7 +198,7 @@ export default function DetailSheet({ item, status, onClose, onSimilar, onPerson
     // A one-off network or TMDb hiccup should not show an error: retry once quietly first.
     const loadDetails = (retriesLeft) =>
       api.details(item.media_type, item.tmdb_id)
-        .then((r) => live && setD(r))
+        .then((r) => { if (live) { setD(r); setRewatchOn(!!r.my_rewatch) } })
         .catch((e) => {
           if (!live) return
           if (retriesLeft > 0 && e?.code !== 'session') timer = setTimeout(() => loadDetails(retriesLeft - 1), 700)
@@ -223,6 +225,16 @@ export default function DetailSheet({ item, status, onClose, onSimilar, onPerson
       setBusy(false)
     }
   }
+  const toggleRewatch = async () => {
+    const next = !rewatch
+    setRewatchOn(next)
+    try {
+      await setRewatch(item, next)
+    } catch (e) {
+      setRewatchOn(!next)
+      notify(errorText(e, 'save_failed'), 'error')
+    }
+  }
   const remove = async () => {
     setBusy(true)
     try {
@@ -235,6 +247,7 @@ export default function DetailSheet({ item, status, onClose, onSimilar, onPerson
     }
   }
 
+  const upcoming = isUpcoming(d?.release_date) // not out yet: it cannot be Seen
   const cur = d ? d.my_status : status // the server knows the saved status even when the sheet was opened from history
   const runtime = d?.runtime ? t('d_runtime', { n: d.runtime }) : null
   const seasons = d?.number_of_seasons ? (d.number_of_seasons === 1 ? t('d_season') : t('d_seasons', { n: d.number_of_seasons })) : null
@@ -268,13 +281,19 @@ export default function DetailSheet({ item, status, onClose, onSimilar, onPerson
             type="button"
             className={`stampbtn stampbtn--${s} ${cur === s ? 'is-current' : ''}`}
             aria-pressed={cur === s}
-            disabled={busy}
+            disabled={busy || (s === 'watched' && upcoming)}
             onClick={() => act(s)}
           >
             {t(`st_${s}`)}
           </button>
         ))}
       </div>
+      {upcoming && <p className="muted small">{t('d_not_out')} {t('d_out_on', { date: fmtDate(d.release_date, lang) })}</p>}
+      {cur === 'watched' && (
+        <button type="button" className={`chip rewatch${rewatch ? ' on' : ''}`} aria-pressed={rewatch} onClick={toggleRewatch}>
+          {t('d_rewatch')}
+        </button>
+      )}
       <button type="button" className="btn btn--ghost btn--block btn--withicon" onClick={() => onSimilar(item)}>
         <span>{t('d_similar')}</span>
         <img src="/logo-mark-2.svg" alt="" />

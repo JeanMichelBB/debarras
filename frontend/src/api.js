@@ -11,6 +11,7 @@ export class ApiError extends Error {
   }
 }
 
+export const apiBase = BASE
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const setToken = (t) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY))
 
@@ -91,8 +92,17 @@ export const api = {
   // swipes
   swipe: (body) => request('/swipe', { method: 'POST', body }),
   undo: (mt, id) => request(`/swipe/${mt}/${id}`, { method: 'DELETE' }),
+  setRewatch: (mt, id, rewatch) => request(`/swipe/${mt}/${id}`, { method: 'PATCH', body: { rewatch } }),
   swipes: (params) => request('/swipes', { query: params }),
   stats: () => request('/swipes/stats'),
+  // insights, collections, calendar
+  taste: () => request('/me/taste'),
+  badges: () => request('/me/badges'),
+  collections: () => request('/collections'),
+  collection: (key) => request(`/collections/${key}`),
+  calendar: () => request('/me/calendar'),
+  newCalendar: () => request('/me/calendar', { method: 'POST' }),
+  removeCalendar: () => request('/me/calendar', { method: 'DELETE' }),
   // import / export
   startImport: (file, status) => {
     const form = new FormData()
@@ -100,6 +110,8 @@ export const api = {
     form.append('status', status)
     return request('/import', { method: 'POST', form })
   },
+  importSources: () => request('/import/sources'),
+  startTraktImport: (username) => request('/import/trakt', { method: 'POST', body: { username } }),
   importStatus: (id) => request(`/import/${id}`),
   exportCsv: async (status) => {
     const res = await request(`/export/${status}`, { raw: true })

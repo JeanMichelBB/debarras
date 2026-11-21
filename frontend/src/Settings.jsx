@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { startRegistration } from '@simplewebauthn/browser'
-import { api } from './api.js'
+import { api, apiBase } from './api.js'
 import { LANGS } from './i18n.js'
 import RecoveryCodes from './RecoveryCodes.jsx'
 import Credits from './Credits.jsx'
@@ -16,7 +16,55 @@ const REGIONS = [
 ]
 const LANG_NAMES = { en: 'English', fr: 'Français' }
 
-export default function Settings({ user, setLang, refreshUser, signOut, onShowGuide, onHistory, onClose, covered }) {
+/** Private link that shows the release day of Want titles in a calendar app. */
+function CalendarFeed() {
+  const { t, notify, errorText } = useApp()
+  const [path, setPath] = useState(undefined) // undefined = loading, null = no link yet
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    api.calendar().then((r) => setPath(r.path)).catch(() => setPath(null))
+  }, [])
+  const url = path ? apiBase + path : ''
+  const run = async (fn) => {
+    setBusy(true)
+    try {
+      await fn()
+    } catch (e) {
+      notify(errorText(e), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const make = () => run(async () => setPath((await api.newCalendar()).path))
+  const remove = () => run(async () => {
+    await api.removeCalendar()
+    setPath(null)
+  })
+  const copy = () => run(async () => {
+    await navigator.clipboard.writeText(url)
+    notify(t('cal_copied'))
+  })
+  return (
+    <div className="setting">
+      <h2>{t('cal_title')}</h2>
+      <p className="muted">{t('cal_body')}</p>
+      {path === null && <button type="button" className="btn btn--ghost" disabled={busy} onClick={make}>{t('cal_create')}</button>}
+      {url && (
+        <>
+          <input className="setting__url" readOnly value={url} aria-label={t('cal_title')} onFocus={(e) => e.target.select()} />
+          <div className="actions">
+            <button type="button" className="btn btn--ghost" disabled={busy} onClick={copy}>{t('cal_copy')}</button>
+            <button type="button" className="btn btn--ghost" disabled={busy} onClick={make}>{t('cal_new')}</button>
+            <button type="button" className="linkbtn" disabled={busy} onClick={remove}>{t('cal_remove')}</button>
+          </div>
+          <p className="muted small">{t('cal_new_hint')}</p>
+        </>
+      )}
+    </div>
+  )
+}
+
+export default function Settings({ user, setLang, refreshUser, signOut, onShowGuide, onHistory, onTaste, onClose, covered }) {
   const { t, lang, notify, errorText } = useApp()
   const [passkeys, setPasskeys] = useState([])
   const [codes, setCodes] = useState(null)
@@ -98,6 +146,13 @@ export default function Settings({ user, setLang, refreshUser, signOut, onShowGu
       </div>
 
       <div className="setting">
+        <button type="button" className="rowlink" onClick={onTaste}>
+          <span>{t('taste_open')}</span>
+          <small>{t('taste_open_hint')}</small>
+        </button>
+      </div>
+
+      <div className="setting">
         <label htmlFor="lang">{t('s_language')}</label>
         <select id="lang" value={lang} disabled={busy} onChange={(e) => changeLang(e.target.value)}>
           {LANGS.map((l) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
@@ -111,6 +166,8 @@ export default function Settings({ user, setLang, refreshUser, signOut, onShowGu
         </select>
         <p className="muted small">{t('s_region_hint')}</p>
       </div>
+
+      <CalendarFeed />
 
       <div className="setting">
         <h2>{t('s_passkeys')}</h2>

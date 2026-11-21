@@ -3,6 +3,7 @@ import { animate, motion, useMotionValue, useTransform } from 'framer-motion'
 import { decide, withMomentum, FLY, PREVIEW, THRESHOLD } from './swipeLogic.js'
 import { Poster, Stamp } from './ui.jsx'
 import { useApp } from './ctx.jsx'
+import { fmtDate } from './format.js'
 
 const BEHIND = 9 // cards visible under the top one (10 in the pile)
 // Hand-dropped pile. Tilt and sideways nudge belong to the title (hashed from its id), not to its
@@ -20,7 +21,7 @@ const SPRING = { type: 'spring', stiffness: 520, damping: 34 }
  * the stamp for that direction. Buttons and keys call trigger() to do the same.
  */
 const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
-  const { t } = useApp()
+  const { t, lang } = useApp()
   const x = useMotionValue(0)
   const y = useMotionValue(0)
   const rotate = useTransform(x, [-260, 0, 260], [-9, 0, 9])
@@ -64,6 +65,7 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
 
   const fly = async (status) => {
     if (busy.current || !top) return
+    if (status === 'watched' && top.upcoming) return // not out yet: Seen is off
     busy.current = true
     setFlying(true)
     setIntent(status)
@@ -130,11 +132,11 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
           onDragStart={() => (moved.current = true)}
           onDrag={(_, info) => {
             const d = decide(info.offset, PREVIEW)
-            setIntent(d && d !== 'details' ? d : null)
+            setIntent(d && d !== 'details' && !(d === 'watched' && top.upcoming) ? d : null)
           }}
           onDragEnd={(_, info) => {
             const d = decide(withMomentum(info.offset, info.velocity), THRESHOLD)
-            if (!d) {
+            if (!d || (d === 'watched' && top.upcoming)) {
               setIntent(null)
               springBack()
             } else if (d === 'details') {
@@ -152,9 +154,11 @@ const Deck = forwardRef(function Deck({ cards, onDecide, onDetails }, ref) {
           <div className="card__meta">
             <h2 className="card__title">{top.title}</h2>
             <p className="card__facts">
-              {top.year && <span>{top.year}</span>}
+              {top.upcoming && top.release_date
+                ? <span>{t('soon_date', { date: fmtDate(top.release_date, lang) })}</span>
+                : top.year && <span>{top.year}</span>}
               <span>{top.media_type === 'tv' ? t('type_tv') : t('type_movie')}</span>
-              {top.vote_average ? <span>{top.vote_average.toFixed(1)} / 10</span> : null}
+              {top.vote_average && !top.upcoming ? <span>{top.vote_average.toFixed(1)} / 10</span> : null}
               {top.genres?.length ? <span>{top.genres.join(' · ')}</span> : null}
             </p>
             {top.reason && <p className="card__reason">{top.reason}</p>}

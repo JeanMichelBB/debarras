@@ -248,6 +248,9 @@ def card(item: dict, media_type: str | None = None, reason: str | None = None) -
         "media_type": mt,
         "title": item.get("title") or item.get("name") or "",
         "year": date[:4] or None,
+        "release_date": date[:10] or None,
+        "genre_ids": [g for g in (item.get("genre_ids") or []) if isinstance(g, int)][:12]
+        or [g["id"] for g in (item.get("genres") or []) if isinstance(g, dict) and "id" in g][:12],
         "poster": poster_url(item.get("poster_path")),
         "overview": item.get("overview") or "",
         "vote_average": item.get("vote_average"),

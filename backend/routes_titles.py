@@ -13,7 +13,7 @@ from auth import get_current_user
 from database.connection import get_db
 from database.models import User, UserTitle
 from ratelimit import rate_limit
-from queue_builder import Filters, build_queue
+from queue_builder import Filters, build_queue, build_soon
 from tmdb import card
 
 router = APIRouter(tags=["titles"])
@@ -36,6 +36,11 @@ def _exclude(csv: str) -> set[tuple[str, int]]:
     return out
 
 
+def _decided(db: Session, user_id: int) -> set[tuple[str, int]]:
+    return {(r.media_type, r.tmdb_id) for r in db.execute(
+        select(UserTitle.media_type, UserTitle.tmdb_id).where(UserTitle.user_id == user_id))}
+
+
 @router.get("/titles/queue", dependencies=[Depends(rate_limit("queue", 120, 60))])
 async def queue(
     limit: int = Query(12, ge=1, le=30),
@@ -45,7 +50,7 @@ async def queue(
     year_max: int | None = Query(None, ge=1888, le=2100),
     min_rating: float | None = Query(None, ge=0, le=10),
     page: int = Query(1, ge=1, le=500),
-    source: Literal["mix", "related", "wild"] = "mix",
+    source: Literal["mix", "related", "wild", "soon"] = "mix",
     shuffle: bool = False,
     person: int | None = Query(None, ge=1),
     company: int | None = Query(None, ge=1),
@@ -54,6 +59,9 @@ async def queue(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if source == "soon":
+        decided = await asyncio.to_thread(_decided, db, user.id)
+        return await build_soon(user, limit, page=min(page, 50), skip=decided | _exclude(exclude))
     filters = Filters(
         media_type=media_type, genres=_int_set(genres, "genres"),
         year_min=year_min, year_max=year_max, min_rating=min_rating,
@@ -84,6 +92,7 @@ async def title_details(
         "region": user.region,
         "my_status": mine.status if mine else None,
         "my_rating": mine.rating if mine else None,
+        "my_rewatch": bool(mine.rewatch) if mine else False,
     }
 
 

@@ -51,7 +51,40 @@ Phase 2
 14. Tonight's pick from the want list (runtime, mood, streaming service).
 15. Availability alerts, shared list with a partner, taste stats.
 
+Phase 2b: items 16 to 23 built on 2026-11-21 (not yet deployed). Ranked by fit with the purpose below.
+
+Purpose test for every feature: it must help the user decide faster, or remember what they decided. The core is sorting a backlog by swiping. If a feature does neither, skip it.
+
+Build order:
+16. **Worth a rewatch.** A flag on a Seen title (not a new status). One tap in the rating step. Lists gets a filter for it; export and "Tonight's pick" can use it.
+17. **Taste card at 25 swipes.** Shown once as a sheet, openable again from Settings. Top 3 genres, favourite decade, movies against series, keep ratio, and a "More like this" button. Needs the title's genres saved at swipe time. A fuller card (director, actor) at 100 swipes. Count swipes on the server.
+18. **One universal list.** Replaces the three tabs. Chips: All, Want, Seen, Not now, with counts. Opens on Want. Search always covers all statuses and switches to All. Each row shows a status stamp. Export follows the chip.
+19. **Collections page.** Franchise browse with progress ("7 of 33 seen"). Two sources: TMDb collections (Harry Potter) and a small curated table of TMDb id lists (for example Marvel, which TMDb splits into about 10 collections).
+20. **Quiet badges.** Computed from existing swipes: finish a collection, swipe milestones (25, 100, 500), one film from every decade, rewatch lover. Small marks only, no extra screen.
+21. **"Coming soon" pile.** A separate button next to the filter button. Never mixed into the normal pile. Reuses the "More like this" pile and its top bar. Up (Want) and left (Not now) only; Seen is off until the release. The card shows the release date. Junk filter: poster and overview present, confirmed release date (`with_release_type` and region), date window of today to 12 months ahead, sort by popularity and read only the first pages, hide "Untitled" or "TBD" titles, hide talk, news and reality series.
+22. **Calendar feed (ICS).** A private, long, secret link in Settings. Shows the release day of Want titles in Apple, Google or Outlook calendar. Needs item 21 to be useful.
+23. **Trakt or Letterboxd import.** One time, for users with history. Trakt has a free OAuth API; Letterboxd is a CSV import.
+
+How items 16 to 23 work (as built):
+- Schema: new columns on `user_titles` (`rewatch`, `genre_ids`, `release_date`) and `users.cal_token`. `backend/database/migrate.py` adds missing columns at startup, so no manual SQL on the cluster.
+- 16: `PATCH /swipe/{type}/{id}` sets the flag (Seen only; a new status clears it). A toast after each Seen swipe and a chip in the detail sheet set it. Lists has a Rewatch filter. `/export/rewatch` and `/export/all` exist.
+- 17: `GET /me/taste` (ready at 25 decisions, full at 100). Opens once per level per device, from Settings at any time. "More like this" uses the `related` pile.
+- 18: Lists chips All, Want, Seen, Not now. Opens on Want. Search covers all statuses. Export follows the chip.
+- 19: `backend/collections_data.py` (TMDb collection ids and a hand-made Marvel id list; checked against live TMDb). Opened from a row in Lists.
+- 20: `GET /me/badges`, shown at the bottom of the taste card. Marks: 25, 100, 500 sorted; every decade 1970s to 2020s; 5 rewatch; finished collection.
+- 21: `GET /titles/queue?source=soon`, button next to the filter button. Up and left only. Junk filters in `queue_builder.build_soon`.
+- 22: `GET/POST/DELETE /me/calendar` and public `GET /calendar/{token}.ics`. A new link replaces the old one.
+- 23: Letterboxd CSV (found on TMDb by title and year) and IMDb CSV share `POST /import`. Trakt import (`POST /import/trakt`, public profiles) is off until the secret `TRAKT_CLIENT_ID` is set (free app at trakt.tv/oauth/applications).
+
+Not recommended for now (off purpose or large effort). Keep for later, only if users ask:
+24. **Public profiles and sharing.** Opt-in, private by default, share chosen items only (badges, top genres, collection progress), no free text, no full lists, shareable badge or taste image. Needs privacy settings (Law 25 / GDPR).
+25. **Features unlocked by swipe count.** Do not lock anything. The taste card at 25 swipes already gives the same feeling. If used at all, lock only new features, never Lists, export, filters or import.
+26. **Browser extension** that marks "Seen" on Google and IMDb results. Google has no API for this.
+27. **Stremio add-on** that shows the Want list.
+
 Decided:
+- **Guest mode (built).** "Try it first" creates a user with no passkey (`POST /auth/guest`, limited to 10 per hour per IP, 365-day token). Adding a passkey later keeps the same user id and all swipes. A sheet asks once after 15 swipes, and Lists shows a banner. Guest data is never deleted.
+- **New users start with well-known titles (built).** Fewer than 30 decided titles: movies come from one `/discover` query per decade (box office and vote count), series by votes and popularity, mixed at random. After 30 decisions the normal trending filler returns.
 - **Languages: French and English. Default English, no auto-detection; the user switches only in Settings.** UI is translated (i18n); TMDb requests use the user's language (`fr-CA` / `en-US`); fun facts fall back to English when the French article is missing.
 - **Fun facts: "Behind the scenes" from Wikipedia, no LLM.** IMDb ID -> Wikidata (P345) -> en/fr Wikipedia article -> excerpt of the Production / Development / Casting / Reception sections, with a "read more" link. Wikipedia text is CC BY-SA: credit Wikipedia and link the article. Titles without an article show nothing.
 

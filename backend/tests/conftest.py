@@ -99,6 +99,11 @@ class FakeTmdb:
             return {"results": [item(700, genre_ids=[35]), item(701, genre_ids=[35])]}
         if path in ("/genre/movie/list", "/genre/tv/list"):
             return {"genres": [{"id": 18, "name": "Drama"}, {"id": 35, "name": "Comedy"}]}
+        if path == "/search/movie":
+            m = re.fullmatch(r"Movie (\d+)", params.get("query", ""))
+            if not m or params.get("year", 2001) != 2001:  # the fake only knows films of 2001
+                return {"results": []}
+            return {"results": [item(int(m.group(1)))]}
         if m := re.fullmatch(r"/find/(tt\d+)", path):
             n = int(m.group(1)[2:])
             if n == 404:

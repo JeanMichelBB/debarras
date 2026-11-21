@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, setOnUnauthorized, setToken } from './api.js'
 import { normalizeLang, translate } from './i18n.js'
-import { bumpGuestSwipes, isOnboarded, isTutorialSeen, loadLang, markSaveAsked, markTutorialSeen, pushHistory, resetTutorial, saveLang, wasSaveAsked } from './storage.js'
+import { bumpGuestSwipes, isOnboarded, isTutorialSeen, loadLang, markSaveAsked, markTasteSeen, markTutorialSeen, pushHistory, resetTutorial, saveLang, tasteSeen, wasSaveAsked } from './storage.js'
 import { EVT_SWIPE, EVT_UNDO } from './actions.js'
 import { AppCtx } from './ctx.jsx'
 import AuthScreen from './AuthScreen.jsx'
@@ -10,6 +10,8 @@ import Tutorial from './Tutorial.jsx'
 import AppSkeleton from './Skeleton.jsx'
 import Sort from './Sort.jsx'
 import Lists from './Lists.jsx'
+import Collections from './Collections.jsx'
+import Taste from './Taste.jsx'
 import Settings from './Settings.jsx'
 import DetailSheet from './DetailSheet.jsx'
 import { HistorySheet, PersonSheet, Trail } from './Explore.jsx'
@@ -30,7 +32,8 @@ export default function App() {
   const [onboarding, setOnboarding] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [saveOpen, setSaveOpen] = useState(false) // a guest is offered to keep their progress
-  const [panel, setPanel] = useState(null) // 'lists' | 'settings': the sheet opened from the bottom bar
+  const [tasteOpen, setTasteOpen] = useState(false) // the taste card: at 25 swipes, again at 100, or from Settings
+  const [panel, setPanel] = useState(null) // 'lists' | 'collections' | 'settings': the sheet opened from the bottom bar
   const [stack, setStack] = useState([]) // sheets opened on top of it: titles, people, history
   const [closeSignal, setCloseSignal] = useState(0)
   const [wantCount, setWantCount] = useState(0)
@@ -48,10 +51,11 @@ export default function App() {
     setLangState(next)
   }, [])
 
-  const notify = useCallback((text, kind = 'info') => {
+  // `action` ({ label, run }) adds one button to the toast, for a quick follow-up such as "Worth a rewatch".
+  const notify = useCallback((text, kind = 'info', action = null) => {
     clearTimeout(toastTimer.current)
-    setToast({ text, kind })
-    toastTimer.current = setTimeout(() => setToast(null), 3500)
+    setToast({ text, kind, action, id: Math.random() })
+    toastTimer.current = setTimeout(() => setToast(null), action ? 5000 : 3500)
   }, [])
 
   const errorText = useCallback(
@@ -103,11 +107,24 @@ export default function App() {
   useEffect(() => {
     if (!user) return undefined
     const load = () => api.stats().then((r) => setWantCount(r.want || 0)).catch(() => {})
+    // The taste card opens once at 25 decisions and once more at 100, counted on the server.
+    const onSwipe = (e) => {
+      api.stats().then((r) => {
+        setWantCount(r.want || 0)
+        if (e.detail?.source !== 'deck') return
+        const total = (r.want || 0) + (r.watched || 0) + (r.not_now || 0)
+        const level = total >= 100 ? 100 : total >= 25 ? 25 : 0
+        if (level > tasteSeen()) {
+          markTasteSeen(level)
+          setTasteOpen(true)
+        }
+      }).catch(() => {})
+    }
     load()
-    window.addEventListener(EVT_SWIPE, load)
+    window.addEventListener(EVT_SWIPE, onSwipe)
     window.addEventListener(EVT_UNDO, load)
     return () => {
-      window.removeEventListener(EVT_SWIPE, load)
+      window.removeEventListener(EVT_SWIPE, onSwipe)
       window.removeEventListener(EVT_UNDO, load)
     }
   }, [user])
@@ -165,6 +182,17 @@ export default function App() {
   const showSimilar = useCallback((item) => showPile('title', item.title, { like: `${item.media_type}:${item.tmdb_id}` }), [showPile])
   const showPersonPile = useCallback((p) => showPile('person', p.name, { person: p.id }), [showPile])
   const showCompanyPile = useCallback((c) => showPile('company', c.name, { company: c.id }), [showPile])
+  // Coming soon is its own pile: it never mixes into the normal one. Up and left only; Seen is off.
+  const showSoon = useCallback(() => showPile('soon', t('soon_open'), { source: 'soon', limit: 30 }), [showPile, t])
+  const showTaste = useCallback(() => {
+    setTasteOpen(false)
+    showPile('taste', t('taste_title'), { source: 'related', limit: 20 })
+  }, [showPile, t])
+  const openPanel = useCallback((name) => {
+    setCloseSignal((n) => n + 1)
+    setStack([])
+    setPanel(name)
+  }, [])
   const togglePanel = useCallback((name) => {
     setCloseSignal((n) => n + 1)
     setStack([])
@@ -188,7 +216,7 @@ export default function App() {
   else if (onboarding) body = <Onboarding onDone={() => setOnboarding(false)} />
   else {
     const full = [
-      ...(panel ? [{ type: 'panel', name: panel === 'lists' ? t('nav_lists') : t('nav_settings'), icon: null }] : []),
+      ...(panel ? [{ type: 'panel', name: { lists: t('nav_lists'), collections: t('nav_collections'), settings: t('nav_settings') }[panel], icon: null }] : []),
       ...stack,
     ]
     const jump = (i) => setStack(full.slice(panel ? 1 : 0, i + 1))
@@ -202,7 +230,7 @@ export default function App() {
           </div>
         </header>
         <div className="screens">
-          <Sort active sheetOpen={!!panel || stack.length > 0} openDetails={openDetails} actionsSlot={actionsSlot} similar={similar} closeSignal={closeSignal} onBeforeFilters={closeAll} />
+          <Sort active sheetOpen={!!panel || stack.length > 0 || tasteOpen} openDetails={openDetails} actionsSlot={actionsSlot} similar={similar} closeSignal={closeSignal} onBeforeFilters={closeAll} onSoon={showSoon} />
         </div>
         <motion.nav className="dock" aria-label="Main" initial={{ y: 90, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={soft}>
           <motion.button type="button" className={`dock__lists${panel === 'lists' ? ' on' : ''}`} aria-pressed={panel === 'lists'} onClick={() => togglePanel('lists')} whileTap={{ scale: 0.94 }} transition={snap}>
@@ -223,12 +251,19 @@ export default function App() {
           {panel === 'lists' && (
             <Sheet key="lists" onClose={closeAll} title={t('nav_lists')} wide tall covered={stack.length > 0}>
               <h2 className="sheet__title">{t('nav_lists')}</h2>
-              <Lists openDetails={openDetails} guest={isGuest} onSave={() => setSaveOpen(true)} />
+              <Lists openDetails={openDetails} guest={isGuest} onSave={() => setSaveOpen(true)} onCollections={() => openPanel('collections')} />
+            </Sheet>
+          )}
+          {panel === 'collections' && (
+            <Sheet key="collections" onClose={closeAll} title={t('nav_collections')} wide tall covered={stack.length > 0}>
+              <h2 className="sheet__title">{t('nav_collections')}</h2>
+              <Collections openDetails={openDetails} />
             </Sheet>
           )}
           {panel === 'settings' && (
             <Settings key="settings" user={user} setLang={setLang} refreshUser={refreshUser} signOut={signOut} onClose={closeAll} covered={stack.length > 0}
               onHistory={() => push({ type: 'history', name: t('h_title'), icon: null })}
+              onTaste={() => setTasteOpen(true)}
               onShowGuide={() => { resetTutorial(); setShowGuide(true); closeAll() }} />
           )}
           {stack.map((e, i) => {
@@ -243,6 +278,7 @@ export default function App() {
             }
             return <HistorySheet key={`${i}:h`} onClose={popSheet} onOpen={openFromHistory} head={head} covered={covered} />
           })}
+          {tasteOpen && <Taste key="taste" onClose={() => setTasteOpen(false)} onMore={showTaste} />}
         </AnimatePresence>
       </div>
     )
@@ -252,7 +288,7 @@ export default function App() {
     <AppCtx.Provider value={ctx}>
       <MotionConfig reducedMotion="user">
         {body}
-        <Toast toast={toast} />
+        <Toast toast={toast} onAction={() => { toast?.action?.run(); setToast(null) }} />
       </MotionConfig>
     </AppCtx.Provider>
   )

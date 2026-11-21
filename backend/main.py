@@ -10,11 +10,15 @@ from prometheus_fastapi_instrumentator import Instrumentator
 import auth
 import config
 import login_posters
+import routes_calendar
+import routes_collections
+import routes_insights
 import routes_io
 import routes_swipes
 import routes_titles
 import tmdb
 from database.connection import DATABASE_URL, SessionLocal, engine
+from database.migrate import add_missing_columns
 from database.models import Base
 from tracing import setup_tracing
 
@@ -41,6 +45,7 @@ def init_database() -> None:
 async def lifespan(app: FastAPI):
     init_database()
     Base.metadata.create_all(bind=engine)
+    add_missing_columns(engine)
     with SessionLocal() as db:
         login_posters.seed(db)
     warm = asyncio.create_task(tmdb.warm_loop()) if config.TMDB_WARM else None
@@ -65,6 +70,9 @@ app.include_router(auth.router)
 app.include_router(routes_titles.router)
 app.include_router(routes_swipes.router)
 app.include_router(routes_io.router)
+app.include_router(routes_collections.router)
+app.include_router(routes_calendar.router)
+app.include_router(routes_insights.router)
 
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
 FastAPIInstrumentor.instrument_app(app)

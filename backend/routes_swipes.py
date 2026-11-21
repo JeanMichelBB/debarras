@@ -24,13 +24,21 @@ class SwipeIn(BaseModel):
     title: str = Field("", max_length=255)
     year: str | None = Field(None, pattern=r"^\d{4}$")
     poster: str | None = Field(None, max_length=500)
+    # Saved with the decision for the taste card and the calendar feed.
+    genre_ids: list[int] | None = Field(None, max_length=12)
+    release_date: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class RewatchIn(BaseModel):
+    rewatch: bool
 
 
 def _item(r: UserTitle) -> dict:
     return {
         "tmdb_id": r.tmdb_id, "media_type": r.media_type, "imdb_id": r.imdb_id, "title": r.title,
         "year": r.year, "poster": poster_url(r.poster_path, "w342"), "status": r.status,
-        "rating": r.rating, "decided_at": r.decided_at.isoformat(),
+        "rating": r.rating, "rewatch": bool(r.rewatch), "release_date": r.release_date,
+        "decided_at": r.decided_at.isoformat(),
     }
 
 
@@ -49,13 +57,33 @@ def swipe(body: SwipeIn, user: User = Depends(get_current_user), db: Session = D
         db.add(row)
     row.status = body.status
     row.rating = body.rating if body.status == "watched" else None
+    if body.status != "watched":
+        row.rewatch = False  # "worth a rewatch" only means something on a Seen title
     if body.title:
         row.title = body.title
     if body.year:
         row.year = body.year
     if path:
         row.poster_path = path
+    if body.genre_ids:
+        row.genre_ids = body.genre_ids
+    if body.release_date:
+        row.release_date = body.release_date
     row.decided_at = utcnow()
+    db.commit()
+    return _item(row)
+
+
+@router.patch("/swipe/{media_type}/{tmdb_id}")
+def set_rewatch(media_type: Literal["movie", "tv"], tmdb_id: int, body: RewatchIn,
+                user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Flag a Seen title as worth a rewatch (or clear the flag)."""
+    row = _find(db, user, media_type, tmdb_id)
+    if row is None:
+        raise HTTPException(404, "no decision for this title")
+    if row.status != "watched":
+        raise HTTPException(409, "only a seen title can be worth a rewatch")
+    row.rewatch = body.rewatch
     db.commit()
     return _item(row)
 
@@ -78,6 +106,7 @@ def list_swipes(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     sort: Literal["recent", "az", "year"] = "recent",
+    rewatch: bool = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -88,6 +117,8 @@ def list_swipes(
         cond.append(UserTitle.media_type == media_type)
     if q:
         cond.append(UserTitle.title.contains(q, autoescape=True))
+    if rewatch:
+        cond.append(UserTitle.rewatch.is_(True))
     total = db.scalar(select(func.count()).select_from(UserTitle).where(*cond))
     order = {
         "recent": (UserTitle.decided_at.desc(), UserTitle.id.desc()),
@@ -105,4 +136,6 @@ def stats(user: User = Depends(get_current_user), db: Session = Depends(get_db))
     counts = dict(db.execute(
         select(UserTitle.status, func.count()).where(UserTitle.user_id == user.id).group_by(UserTitle.status)
     ).all())
-    return {s: counts.get(s, 0) for s in STATUSES}
+    rewatch = db.scalar(select(func.count()).select_from(UserTitle).where(
+        UserTitle.user_id == user.id, UserTitle.rewatch.is_(True))) or 0
+    return {**{s: counts.get(s, 0) for s in STATUSES}, "rewatch": rewatch}

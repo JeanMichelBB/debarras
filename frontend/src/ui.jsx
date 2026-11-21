@@ -200,12 +200,12 @@ export function Sheet({ onClose, title, children, wide = false, head = null, cov
   )
 }
 
-export function Toast({ toast }) {
+export function Toast({ toast, onAction }) {
   return (
     <AnimatePresence>
       {toast && (
         <motion.div
-          key={toast.text}
+          key={toast.id ?? toast.text}
           className={`toast ${toast.kind === 'error' ? 'toast--error' : ''}`}
           role="status"
           style={{ x: '-50%' }}
@@ -213,7 +213,8 @@ export function Toast({ toast }) {
           animate={{ opacity: 1, y: 0, transition: base }}
           exit={{ opacity: 0, y: 8, transition: leave }}
         >
-          {toast.text}
+          <span>{toast.text}</span>
+          {toast.action && <button type="button" className="toast__action" onClick={onAction}>{toast.action.label}</button>}
         </motion.div>
       )}
     </AnimatePresence>
@@ -223,6 +224,7 @@ export function Toast({ toast }) {
 const ICONS = {
   filter: 'M3 5h18l-7 8v6l-4 2v-8z',
   undo: 'M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3',
+  soon: 'M5 4h14a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM3 10h18M8 2v4M16 2v4',
   list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   history: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   back: 'M15 18l-6-6 6-6',

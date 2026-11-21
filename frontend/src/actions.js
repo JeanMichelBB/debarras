@@ -2,6 +2,7 @@ import { api } from './api.js'
 
 export const EVT_SWIPE = 'debarras:swipe'
 export const EVT_UNDO = 'debarras:undo'
+export const EVT_REWATCH = 'debarras:rewatch'
 
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }))
 
@@ -14,8 +15,17 @@ export async function commitSwipe(status, item, source = 'deck') {
     title: item.title || '',
     year: item.year || undefined,
     poster: item.poster || undefined,
+    genre_ids: item.genre_ids?.length ? item.genre_ids : undefined,
+    release_date: item.release_date || undefined,
   })
   emit(EVT_SWIPE, { status, item, source })
+  return saved
+}
+
+/** Flag a Seen title as worth a rewatch, or clear the flag. */
+export async function setRewatch(item, rewatch) {
+  const saved = await api.setRewatch(item.media_type, item.tmdb_id, rewatch)
+  emit(EVT_REWATCH, { item, rewatch })
   return saved
 }
 

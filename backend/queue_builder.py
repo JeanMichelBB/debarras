@@ -8,7 +8,7 @@ excluded. v1 treats "not_now" like any decided title; resurfacing them is phase 
 import asyncio
 import random
 from types import SimpleNamespace
-from datetime import date as _date
+from datetime import date as _date, timedelta
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
@@ -299,3 +299,60 @@ async def build_queue(
         for c in queue:
             c["reason"] = (c.get("reason") or "").replace("Because you liked", "Similar to")
     return {"cards": queue, "next_page": next_page}
+
+
+# ── Coming soon ──────────────────────────────────────────────────────────────
+SOON_DAYS = 365       # look this far ahead
+SOON_PAGES = 3        # TMDb sorts by popularity, so the first pages hold the titles people wait for
+_JUNK_TITLE = ("untitled", "tbd", "tba", "to be announced", "sans titre")
+_JUNK_TV_GENRES = "10767|10763|10764"  # talk, news, reality: not something to plan a watch around
+
+
+def _is_junk_soon(raw: dict) -> bool:
+    title = (raw.get("title") or raw.get("name") or "").strip().lower()
+    return (
+        not raw.get("poster_path") or not (raw.get("overview") or "").strip()
+        or not title or any(title.startswith(j) for j in _JUNK_TITLE)
+    )
+
+
+async def build_soon(user: User, limit: int, page: int = 1, skip: set[tuple[str, int]] | None = None) -> dict:
+    """Titles that come out within the next year, most awaited first. Never mixed into the normal pile.
+
+    Movies need a confirmed theatrical date in the user's region (release type 2 or 3). Series need a
+    first air date in the window and are not talk, news or reality shows."""
+    today = _date.today()
+    start, end = today.isoformat(), (today + timedelta(days=SOON_DAYS)).isoformat()
+    skip = skip or set()
+    movie = {"sort_by": "popularity.desc", "include_adult": "false", "region": user.region,
+             "with_release_type": "2|3", "release_date.gte": start, "release_date.lte": end}
+    tv = {"sort_by": "popularity.desc", "include_adult": "false", "first_air_date.gte": start,
+          "first_air_date.lte": end, "without_genres": _JUNK_TV_GENRES}
+    genre_names = await _genre_names(user.lang)
+    cards: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    p = page
+    for p in range(page, page + SOON_PAGES):
+        res = await asyncio.gather(
+            _safe(tmdb.tmdb_get("/discover/movie", {**movie, "page": p}, lang=user.lang)),
+            _safe(tmdb.tmdb_get("/discover/tv", {**tv, "page": p}, lang=user.lang)),
+        )
+        lists = [[(raw, kind) for raw in (r or {}).get("results", [])] for r, kind in zip(res, ("movie", "tv"))]
+        for i in range(max((len(x) for x in lists), default=0)):  # one movie, one series
+            for lst in lists:
+                if i >= len(lst):
+                    continue
+                raw, kind = lst[i]
+                key = (kind, raw["id"])
+                date = raw.get("release_date") or raw.get("first_air_date") or ""
+                if key in skip or key in seen or _is_junk_soon(raw) or not (start <= date[:10] <= end):
+                    continue
+                seen.add(key)
+                c = card(raw, kind, "Coming soon")
+                c["upcoming"] = True
+                c["genres"] = [genre_names[g] for g in (raw.get("genre_ids") or []) if g in genre_names][:2]
+                cards.append(c)
+        if len(cards) >= limit:
+            break
+    cards.sort(key=lambda c: c["release_date"] or "")  # soonest first
+    return {"cards": cards[:limit], "next_page": p + 1}

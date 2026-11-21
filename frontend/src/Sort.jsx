@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { fadeUp, slideDown } from './motion.jsx'
 import { api } from './api.js'
-import { commitSwipe, removeSwipe, sameTitle, EVT_SWIPE, EVT_UNDO } from './actions.js'
+import { commitSwipe, removeSwipe, setRewatch, sameTitle, EVT_SWIPE, EVT_UNDO } from './actions.js'
 import { decisionForKey, filterParams, countActiveFilters, EMPTY_FILTERS } from './swipeLogic.js'
 import { loadFilters, saveFilters } from './storage.js'
 import Deck from './Deck.jsx'
@@ -19,7 +19,7 @@ const HOLD_LOADING = import.meta.env.DEV && new URLSearchParams(window.location.
 
 const idOf = (c) => `${c.media_type}:${c.tmdb_id}`
 
-export default function Sort({ active, sheetOpen, openDetails, actionsSlot, similar, closeSignal, onBeforeFilters }) {
+export default function Sort({ active, sheetOpen, openDetails, actionsSlot, similar, closeSignal, onBeforeFilters, onSoon }) {
   const { t, notify, errorText } = useApp()
   const [filters, setFilters] = useState(loadFilters)
   const [stack, setStack] = useState([])
@@ -108,6 +108,10 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot, simi
     setCanUndo(true)
     try {
       await commitSwipe(status, card, 'deck')
+      // One tap to flag a title that is worth seeing again.
+      if (status === 'watched') {
+        notify(t('toast_seen'), 'info', { label: t('d_rewatch'), run: () => setRewatch(card, true).catch((e) => notify(errorText(e, 'save_failed'), 'error')) })
+      }
     } catch (e) {
       decided.current.delete(idOf(card))
       setStack((s) => [card, ...s])
@@ -226,7 +230,7 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot, simi
   // "More like this" from a detail sheet: replace the pile with titles similar to that one.
   useEffect(() => {
     if (!similar) return
-    const { label, query } = similar
+    const { label, query, kind } = similar
     let live = true
     setLoading(true)
     setError(null)
@@ -234,7 +238,7 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot, simi
       .then((res) => {
         if (!live) return
         const fresh = res.cards.filter((c) => !decided.current.has(idOf(c)))
-        if (!fresh.length) return notify(t('sort_similar_none', { title: label }))
+        if (!fresh.length) return notify(kind === 'soon' ? t('sort_soon_none') : kind === 'taste' ? t('sort_taste_none') : t('sort_similar_none', { title: label }))
         history.current = []
         setCanUndo(false)
         exhaustedRef.current = false
@@ -265,6 +269,7 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot, simi
       {active && actionsSlot && createPortal(
         <>
           <IconButton icon="filter" label={t('filters')} badge={nActive} on={showFilters} pill onClick={() => { if (showFilters) { setShowFilters(false); return } onBeforeFilters?.(); setShowFilters(true) }} />
+          <IconButton icon="soon" label={t('soon_open')} on={likeOf?.kind === 'soon'} onClick={() => onSoon?.()} />
           <IconButton icon="undo" label={t('undo')} hot={canUndo} disabled={!canUndo} onClick={undo} />
         </>,
         actionsSlot,
@@ -273,7 +278,7 @@ export default function Sort({ active, sheetOpen, openDetails, actionsSlot, simi
         <AnimatePresence>
           {likeOf && !empty && (
             <motion.p key="similar" className="similar-bar" {...slideDown}>
-              <span>{t(likeOf.kind === 'title' ? 'sort_similar_to' : 'sort_person_to', { title: likeOf.label })}</span>
+              <span>{t({ title: 'sort_similar_to', soon: 'sort_soon_to', taste: 'sort_taste_to' }[likeOf.kind] || 'sort_person_to', { title: likeOf.label })}</span>
               <button type="button" className="linkbtn" onClick={backToMine}>{t('sort_similar_back')}</button>
             </motion.p>
           )}

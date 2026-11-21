@@ -33,7 +33,7 @@ def test_swipe_flow_edit_and_undo(client, user):
     item = client.get("/swipes", headers=user).json()["items"][0]
     assert item["status"] == "want" and item["rating"] is None  # rating only kept for watched
 
-    assert client.get("/swipes/stats", headers=user).json() == {"watched": 0, "want": 1, "not_now": 0}
+    assert client.get("/swipes/stats", headers=user).json() == {"watched": 0, "want": 1, "not_now": 0, "rewatch": 0}
     assert client.delete("/swipe/movie/1", headers=user).status_code == 204
     assert client.delete("/swipe/movie/1", headers=user).status_code == 404
     assert client.get("/swipes", headers=user).json()["total"] == 0
@@ -170,3 +170,123 @@ def test_import_then_export_round_trip(client, user):
     lines = client.get("/export/watched", headers=user).text.strip().splitlines()
     assert lines[0] == "Const,Title,Year"
     assert {l.split(",")[0] for l in lines[1:]} == {"tt0000001", "tt0000002", "tt0000003", "tt0005001"}
+
+
+# ── worth a rewatch ───────────────────────────────────────────────────────────
+def test_rewatch_flag_only_on_seen_and_cleared_when_status_changes(client, user):
+    swipe(client, user, 1, "want")
+    assert client.patch("/swipe/movie/1", headers=user, json={"rewatch": True}).status_code == 409
+    assert client.patch("/swipe/movie/99", headers=user, json={"rewatch": True}).status_code == 404
+
+    swipe(client, user, 1, "watched")
+    r = client.patch("/swipe/movie/1", headers=user, json={"rewatch": True})
+    assert r.status_code == 200 and r.json()["rewatch"] is True
+    assert client.get("/swipes/stats", headers=user).json()["rewatch"] == 1
+    assert client.get("/swipes", headers=user, params={"rewatch": "true"}).json()["total"] == 1
+
+    swipe(client, user, 1, "want")  # leaves Seen: the flag goes away
+    assert client.get("/swipes", headers=user).json()["items"][0]["rewatch"] is False
+    assert client.get("/swipes", headers=user, params={"rewatch": "true"}).json()["total"] == 0
+
+
+def test_rewatch_flag_is_private_to_the_user(client, register):
+    a, _ = register()
+    b, _ = register()
+    swipe(client, a, 1, "watched")
+    assert client.patch("/swipe/movie/1", headers=b, json={"rewatch": True}).status_code == 404
+
+
+def test_export_all_and_rewatch(client, user):
+    swipe(client, user, 1, "watched")
+    swipe(client, user, 2, "want")
+    swipe(client, user, 3, "watched")
+    client.patch("/swipe/movie/3", headers=user, json={"rewatch": True})
+    rows = lambda name: client.get(f"/export/{name}", headers=user).text.strip().splitlines()[1:]
+    assert len(rows("all")) == 3
+    assert rows("rewatch") == ["tt0000003,Movie 3,"]
+
+
+def test_swipe_saves_genres_and_release_date(client, user):
+    swipe(client, user, 1, "want", genre_ids=[18, 35], release_date="2027-05-01")
+    it = client.get("/swipes", headers=user).json()["items"][0]
+    assert it["release_date"] == "2027-05-01"
+    assert swipe(client, user, 2, "want", release_date="soon").status_code == 422
+
+
+# ── Letterboxd and Trakt ──────────────────────────────────────────────────────
+LETTERBOXD = (
+    "Date,Name,Year,Letterboxd URI,Rating\n"
+    "2024-01-01,Movie 1,2001,https://boxd.it/a,4.5\n"
+    "2024-01-02,Movie 2,2002,https://boxd.it/b,2\n"      # a year off: still found
+    "2024-01-03,Nothing Here,1999,https://boxd.it/c,3\n"
+    "2024-01-04,Movie 1,2001,https://boxd.it/a,4.5\n"    # twice in the file
+)
+
+
+def test_import_letterboxd_csv_finds_titles_by_name_and_year(client, user):
+    r = client.post("/import", headers=user, files=csv_file(LETTERBOXD), data={"status": "watched"})
+    assert r.status_code == 202 and r.json()["total"] == 3
+    job = wait_job(client, user, r.json()["job_id"])
+    assert (job["imported"], job["not_found"]) == (2, 1)
+    items = {i["tmdb_id"]: i for i in client.get("/swipes", headers=user).json()["items"]}
+    assert items[1]["rating"] == 3 and items[2]["rating"] == 1 and items[1]["status"] == "watched"
+
+
+def test_import_letterboxd_watchlist_has_no_rating_column(client, user):
+    csv = "Date,Name,Year,Letterboxd URI\n2024-01-01,Movie 1,2001,https://boxd.it/a\n"
+    job = wait_job(client, user, client.post("/import", headers=user, files=csv_file(csv), data={"status": "want"}).json()["job_id"])
+    assert job["imported"] == 1
+    assert client.get("/swipes", headers=user).json()["items"][0]["status"] == "want"
+
+
+def test_import_saves_genres_for_the_taste_card(client, user):
+    job = wait_job(client, user, client.post("/import", headers=user, files=csv_file(RATINGS)).json()["job_id"])
+    assert job["imported"] >= 1
+    from database.connection import SessionLocal
+    from database.models import UserTitle
+    with SessionLocal() as db:
+        assert all(r.genre_ids == [18] for r in db.query(UserTitle).all())
+
+
+def _trakt(monkeypatch, config_id="abc"):
+    import config
+    import routes_io
+    monkeypatch.setattr(config, "TRAKT_CLIENT_ID", config_id)
+    data = {
+        "/watched/movies": [{"movie": {"ids": {"tmdb": 1}}}, {"movie": {"ids": {"tmdb": 2}}}],
+        "/watched/shows": [{"show": {"ids": {"tmdb": 5001}}}],
+        "/watchlist/movies": [{"movie": {"ids": {"tmdb": 3}}}, {"movie": {"ids": {"tmdb": 1}}}],  # 1 is seen: not also Want
+        "/watchlist/shows": [],
+        "/ratings/movies": [{"rating": 9, "movie": {"ids": {"tmdb": 1}}}],
+        "/ratings/shows": [],
+    }
+
+    async def fake(path):
+        if "/users/private" in path:
+            from fastapi import HTTPException
+            raise HTTPException(400, "Trakt profile not found, or it is private")
+        return next(v for k, v in data.items() if path.endswith(k))
+
+    monkeypatch.setattr(routes_io, "trakt_get", fake)
+
+
+def test_trakt_import_brings_seen_ratings_and_watchlist(client, user, monkeypatch):
+    _trakt(monkeypatch)
+    assert client.get("/import/sources", headers=user).json() == {"trakt": True}
+    r = client.post("/import/trakt", headers=user, json={"username": "@someone"})
+    assert r.status_code == 202 and r.json()["total"] == 4
+    job = wait_job(client, user, r.json()["job_id"])
+    assert job["imported"] == 4
+    items = {(i["media_type"], i["tmdb_id"]): i for i in client.get("/swipes", headers=user).json()["items"]}
+    assert items[("movie", 1)]["status"] == "watched" and items[("movie", 1)]["rating"] == 3
+    assert items[("movie", 3)]["status"] == "want"
+    assert items[("tv", 5001)]["status"] == "watched"
+
+
+def test_trakt_import_errors(client, user, monkeypatch):
+    import config
+    assert client.get("/import/sources", headers=user).json() == {"trakt": False}
+    assert client.post("/import/trakt", headers=user, json={"username": "x"}).status_code == 503
+    _trakt(monkeypatch)
+    assert client.post("/import/trakt", headers=user, json={"username": "bad name!"}).status_code == 422
+    assert client.post("/import/trakt", headers=user, json={"username": "private"}).status_code == 400

@@ -452,3 +452,50 @@ progress { width: 100%; height: 8px; accent-color: var(--ink-watched); }
 .sheet--headed .sheet__body { padding-top: 76px; }
 .btn--withicon { position: relative; display: inline-flex; align-items: center; justify-content: center; overflow: visible; }
 .btn--withicon img { position: absolute; right: 8px; top: 50%; transform: translateY(-50%) rotate(6deg); height: 150%; width: auto; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.4)); }
+
+/* ── Phase 2b: rewatch, universal list, taste card, collections, coming soon, calendar ── */
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast__action { background: none; border: 0; padding: 4px 2px; font: inherit; font-weight: 800; color: inherit; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
+.chip.rewatch.on { background: var(--ink-want); border-color: var(--ink-want); color: #1a1405; }
+.lists__filters { display: flex; gap: 8px; }
+
+.tile__st {
+  position: absolute; top: 6px; left: 6px; padding: 2px 6px; border-radius: 4px; font-size: 0.6875rem; font-weight: 800;
+  letter-spacing: 0.04em; background: rgba(10, 16, 25, 0.82); border: 1px solid currentColor;
+}
+.tile__st--watched { color: var(--ink-watched); }
+.tile__st--want { color: var(--ink-want); }
+.tile__st--not_now { color: var(--ink-not_now); }
+.tile__again { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--ink-want); color: #1a1405; font-size: 0.8125rem; font-weight: 800; line-height: 1; }
+.tile__loved + .tile__st ~ .tile__again { top: 22px; }
+.tile__soon { position: absolute; left: 6px; bottom: 34px; padding: 1px 6px; border-radius: 4px; font-size: 0.6875rem; font-weight: 700; background: rgba(10, 16, 25, 0.82); color: var(--text); }
+.tile--dim .poster { opacity: 0.45; }
+
+.taste { display: grid; gap: 18px; }
+.taste__block { display: grid; gap: 10px; margin-top: 18px; }
+.taste .taste__block { margin-top: 0; }
+.taste__block h3 { font: 800 1.1rem/1 var(--display); letter-spacing: 0.04em; }
+.taste__bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.taste__bars li { display: grid; gap: 4px; font-weight: 600; }
+.taste__bars i { display: block; height: 8px; border-radius: 4px; background: var(--ink-want); }
+.taste__facts { margin: 0; display: grid; gap: 10px; }
+.taste__facts div { display: grid; gap: 2px; }
+.taste__facts dt { color: var(--muted); font-size: 0.875rem; }
+.taste__facts dd { margin: 0; font-weight: 700; font-size: 1.0625rem; }
+.marks { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.mark { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 11px; border-radius: 999px; border: 1px dashed var(--line); color: var(--muted); font-size: 0.875rem; font-weight: 600; }
+.mark small { font-weight: 400; }
+.mark.on { border: 1px solid var(--ink-watched); color: var(--ink-watched); }
+
+.colls { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.colls__row { display: flex; gap: 14px; align-items: center; width: 100%; padding: 8px; text-align: left; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text); }
+.colls__poster { flex: none; width: 52px; aspect-ratio: 2 / 3; border-radius: 6px; overflow: hidden; background: var(--ground); }
+.colls__text { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.colls__text small { color: var(--muted); }
+.colbar { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.colbar i { display: block; height: 100%; background: var(--ink-watched); }
+
+.import__trakt { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.import__trakt h3 { font: 800 1.1rem/1 var(--display); letter-spacing: 0.04em; }
+.setting__url { width: 100%; font-size: 0.8125rem; }
+.setting .actions { flex-wrap: wrap; }

@@ -34,6 +34,10 @@ TMDB_RPS = float(os.getenv("TMDB_RPS", "30"))  # stay under TMDb's ~40 req/s per
 CACHE_TTL_DAYS = int(os.getenv("CACHE_TTL_DAYS", "7"))
 FACTS_TTL_DAYS = int(os.getenv("FACTS_TTL_DAYS", "30"))
 
+# Trakt "client id" (free, from trakt.tv/oauth/applications). Without it the Trakt import is off.
+# Public profiles need only this id, so no OAuth sign-in and no secret are stored.
+TRAKT_CLIENT_ID = os.getenv("TRAKT_CLIENT_ID", "")
+
 DEFAULT_LANG = "en"
 DEFAULT_REGION = "CA"
 
